@@ -1,0 +1,12 @@
+* {
+	padding: 0;
+	margin: 0;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+}
+canvas {
+	position: absolute;
+	background-color: #000;
+	top: 0;
+	left: 0;
+}
