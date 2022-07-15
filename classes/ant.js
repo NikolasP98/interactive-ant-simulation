@@ -25,31 +25,26 @@ export default class Ant {
 		this.position = new Vector(x, y);
 		this.velocity = new Vector(0, 0);
 		this.acceleration = new Vector(0, 0);
-
-		this.lastPosition = new Vector(x, y);
-		this.homeCoordinates = new Vector(x, y);
+		this.theta = 0;
 
 		this.hasFood = false;
 
 		this.colony = colony;
 
 		this.maxSpeed = 1;
-		this.maxForce = 4;
+		this.maxForce = 0.01;
 
 		this.radius = radius;
 		this.color = color;
 
 		this.showRadius = showRadius;
-		this.instinct = this.radius * 5;
+		this.instinct = this.radius * 30;
 
-		this.pheromones = [];
 		this.strength = 1;
-
-		this.id = v4();
 
 		this.#ctx = ctx;
 		this.#foodMap = this.colony.foodMap;
-		this.#WANDER_CHANCE = 0.92;
+		this.#WANDER_CHANCE = 0.9;
 	}
 
 	#layPheromone() {
@@ -130,12 +125,12 @@ export default class Ant {
 			ctx: this.#ctx,
 		});
 
-		for (let pheromone of this.pheromones) {
-			pheromone.show();
-		}
-		if (this.ring) {
+		// for (let pheromone of this.pheromones) {
+		// 	pheromone.show();
+		// }
+		if (this.showRadius) {
 			this.#ctx.fillStyle = 'transparent';
-			this.#ctx.strokeStyle = 'white';
+			this.#ctx.strokeStyle = 'rgb(255, 255, 255, 0.2)';
 			ellipse({
 				x: this.position.x,
 				y: this.position.y,
@@ -145,34 +140,14 @@ export default class Ant {
 		}
 	}
 
-	#step() {
-		const rand = Math.random();
-		if (rand > this.#WANDER_CHANCE) {
-			this.velocity = new Vector(
-				getRandom(-1 * this.maxSpeed, this.maxSpeed),
-				getRandom(-1 * this.maxSpeed, this.maxSpeed)
-			);
-		}
-		if (this.hasFood) {
-			// sniff home
-			this.velocity = this.velocity.add(
-				this.homeCoordinates.sub(this.position).normalize().mult(0.1)
-			);
-		} else {
-			// sniff food
-		}
-		this.#layPheromone();
-		this.position = this.position.add(this.velocity);
+	#walk() {
+		// get food
 	}
 
 	update() {
-		this.#step();
+		this.#walk();
 		this.#edges();
-		if (this.hasFood) {
-			this.#dropOff();
-		} else {
-			this.#eat();
-		}
+
 		this.#draw();
 	}
 }

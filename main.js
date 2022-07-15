@@ -1,6 +1,5 @@
-import { Colony, Food, InputHandler } from './classes';
-import { getRandom } from './classes';
-
+import { Colony, Food, InputHandler, getRandom } from './classes';
+import { rect } from './classes/shapes';
 export default class Main {
 	#ctx;
 	#width;
@@ -30,6 +29,10 @@ export default class Main {
 				})
 			);
 			// console.log(this.#colonyArray);
+		});
+
+		window.addEventListener('contextmenu', (e) => {
+			console.log('right click');
 		});
 
 		this.foodBits = 2;
@@ -65,7 +68,16 @@ export default class Main {
 			colony.update();
 		}
 
-		// this.food.update();
+		this.#ctx.fillStyle = this.color;
+		this.#ctx.strokeStyle = 'transparent';
+
+		rect({
+			x: 50,
+			y: 50,
+			w: 20,
+			h: 50,
+			ctx: this.#ctx,
+		});
 
 		// MAIN ANIMATION CODE END
 		this.animation = window.requestAnimationFrame(this.#animate.bind(this));
