@@ -1,27 +1,26 @@
 import Vector from './vector.js';
-import { ellipse } from './shapes.js';
-import { getRandom } from './util.js';
 
-import { v4 } from 'uuid';
+const settings = {
+	wanderStrength: 0.1,
+	steerForce: 0.1,
 
+	perceptionRadius: 100,
+	showRadius: true,
+};
 export default class Ant {
-	#ctx;
-	#WANDER_CHANCE;
+	static debug = false;
+
 	#foodMap;
 
-	constructor({
+	constructor(
 		x = 0,
 		y = 0,
-
-		radius = 2,
-
 		colony = null,
+		radius = 5,
 
 		color = 'white',
-		showRadius = true,
-
-		ctx,
-	}) {
+		showRadius = true
+	) {
 		this.position = new Vector(x, y);
 		this.velocity = new Vector(0, 0);
 		this.acceleration = new Vector(0, 0);
@@ -38,13 +37,23 @@ export default class Ant {
 		this.color = color;
 
 		this.showRadius = showRadius;
-		this.instinct = this.radius * 30;
+		this.perceptionRadius = 100;
 
 		this.strength = 1;
 
-		this.#ctx = ctx;
 		this.#foodMap = this.colony.foodMap;
-		this.#WANDER_CHANCE = 0.9;
+	}
+
+	static debugger(gui) {
+		if (!this.debug) {
+			this.debug = true;
+			const antFolder = gui.addFolder('Ant');
+
+			antFolder.add(settings, 'wanderStrength', 0, 1);
+			antFolder.add(settings, 'steerForce', 0, 1);
+			antFolder.add(settings, 'perceptionRadius', 0, 1000);
+			antFolder.add(settings, 'showRadius', true);
+		}
 	}
 
 	#layPheromone() {
@@ -99,55 +108,91 @@ export default class Ant {
 
 	#edges() {
 		if (this.position.x > canvas.width) {
-			// console.log('invaded right');
 			this.position.x = 0;
 		} else if (this.position.x < 0) {
-			// console.log('invaded left');
 			this.position.x = canvas.width;
 		}
 		if (this.position.y > canvas.height) {
-			// console.log('invaded down');
 			this.position.y = 0;
 		} else if (this.position.y < 0) {
-			// console.log('invaded up');
 			this.position.y = canvas.height;
 		}
 	}
 
-	#draw() {
-		this.#ctx.fillStyle = this.color;
-		this.#ctx.strokeStyle = 'transparent';
+	#draw(ctx) {
+		if (settings.showRadius) {
+			ctx.strokeStyle = 'rgba(255,255,255, 0.5)';
 
-		ellipse({
-			x: this.position.x,
-			y: this.position.y,
-			radius: this.radius,
-			ctx: this.#ctx,
-		});
-
-		// for (let pheromone of this.pheromones) {
-		// 	pheromone.show();
-		// }
-		if (this.showRadius) {
-			this.#ctx.fillStyle = 'transparent';
-			this.#ctx.strokeStyle = 'rgb(255, 255, 255, 0.2)';
-			ellipse({
-				x: this.position.x,
-				y: this.position.y,
-				radius: this.instinct,
-				ctx: this.#ctx,
-			});
+			ctx.beginPath();
+			ctx.arc(
+				this.position.x,
+				this.position.y,
+				settings.perceptionRadius,
+				0,
+				2 * Math.PI
+			);
+			ctx.closePath();
+			ctx.stroke();
 		}
+
+		ctx.fillStyle = this.color;
+		ctx.strokeStyle = '#000';
+
+		ctx.beginPath();
+		ctx.save();
+		ctx.translate(this.position.x, this.position.y);
+		ctx.rotate(this.theta);
+		ctx.moveTo(-this.radius, -this.radius / 1.5);
+		ctx.lineTo(-this.radius, this.radius / 1.5);
+		ctx.lineTo(this.radius, 0);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	search(foodArray) {
+		const randX = Math.random() * 2 - 1;
+		const randY = Math.random() * 2 - 1;
+
+		return new Vector(randX, randY).normalize().mult(this.maxSpeed);
+	}
+
+	wander() {
+		const randX = Math.random() * 2 - 1;
+		const randY = Math.random() * 2 - 1;
+
+		return new Vector(randX, randY).normalize().mult(this.maxSpeed);
 	}
 
 	#walk() {
-		// get food
+		let steeringForce = new Vector(0, 0);
+
+		if (this.hasFood) {
+			// if has food, drop off
+		} else {
+			steeringForce
+				.add(this.search(this.colony.foodMap))
+				.mult(settings.steerForce);
+			// get food:
+			// if food is found, go to food
+			// if food is not found, search for food and pheromones
+		}
+
+		// mandatory wander
+		const wander = this.wander().mult(settings.wanderStrength);
+
+		this.acceleration.add(steeringForce).add(wander);
 	}
 
-	update() {
-		this.#walk();
-		this.#edges();
+	update(ctx) {
+		this.theta = this.velocity.getAngle();
 
-		this.#draw();
+		this.#walk();
+		this.position.add(this.velocity);
+		this.#edges();
+		this.velocity.add(this.acceleration).limit(this.maxSpeed);
+		this.acceleration.mult(0);
+		this.#draw(ctx);
 	}
 }

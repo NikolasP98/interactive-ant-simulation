@@ -1,58 +1,63 @@
 import Ant from './ant.js';
 import Vector from './vector.js';
-import { rect, ellipse } from './shapes.js';
 
+const settings = {
+	maxPopulation: 5,
+};
 export default class Colony {
-	#maxPopulation;
-	#ants;
-	#ctx;
+	static debug = false;
 
-	constructor({ x, y, maxPop = 5, foodMap, ctx }) {
+	#ants;
+
+	constructor(x, y, foodMap) {
 		this.position = new Vector(x, y);
-		this.width = 20;
-		this.height = 20;
-		this.#maxPopulation = maxPop;
+		this.size = 20;
+		this.maxPopulation = settings.maxPopulation;
 		this.#ants = [];
 
 		this.foodMap = foodMap;
+		console.log(typeof this.foodMap);
+		console.log(typeof foodMap);
 
-		this.#createAnt(200);
-
-		this.#ctx = ctx;
+		this.#createAnt();
 	}
 
-	async #createAnt(ms) {
+	static debugger(gui) {
+		if (!this.debug) {
+			this.debug = true;
+
+			const colonyFolder = gui.addFolder('Colony');
+			colonyFolder.add(settings, 'maxPopulation', 0, 20, 1);
+
+			Ant.debugger(gui);
+		}
+	}
+
+	async #createAnt(ms = 200) {
 		await setTimeout(() => {
-			if (this.#ants.length < this.#maxPopulation) {
+			if (this.#ants.length < this.maxPopulation) {
 				this.#ants.push(
-					new Ant({
-						x: this.position.x,
-						y: this.position.y,
-						colony: this,
-						ctx: this.#ctx,
-					})
+					new Ant(this.position.x, this.position.y, this)
 				);
 				this.#createAnt(ms);
 			}
 		}, ms);
 	}
 
-	#draw() {
-		this.#ctx.fillStyle = 'orange';
-		this.#ctx.strokeStyle = 'transparent';
-		rect({
-			x: this.position.x,
-			y: this.position.y,
-			w: this.width,
-			h: this.height,
-			ctx: this.#ctx,
-		});
+	#draw(ctx) {
+		ctx.fillStyle = 'orange';
+		ctx.fillRect(
+			this.position.x - this.size / 2,
+			this.position.y - this.size / 2,
+			this.size,
+			this.size
+		);
 	}
 
-	update() {
+	update(ctx) {
 		for (let ant of this.#ants) {
-			ant.update();
+			ant.update(ctx);
 		}
-		this.#draw();
+		this.#draw(ctx);
 	}
 }

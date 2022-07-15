@@ -29,27 +29,76 @@ export default class Vector {
 		this.#z = z;
 	}
 
-	add = (otherVector) => {
+	static add = (vector, otherVector) => {
 		return new Vector(
-			this.#x + otherVector.x,
-			this.#y + otherVector.y,
-			this.#z + otherVector.z
+			vector.x + otherVector.x,
+			vector.y + otherVector.y,
+			vector.z + otherVector.z
 		);
 	};
 
-	sub(otherVector) {
+	add = (otherVector) => {
+		this.#x += otherVector.x;
+		this.#y += otherVector.y;
+		this.#z += otherVector.z;
+
+		return this;
+	};
+
+	static sub(vector, otherVector) {
 		return new Vector(
-			this.#x - otherVector.x,
-			this.#y - otherVector.y,
-			this.#z - otherVector.z
+			vector.x - otherVector.x,
+			vector.y - otherVector.y,
+			vector.z - otherVector.z
 		);
 	}
+
+	sub(otherVector) {
+		this.#x -= otherVector.x;
+		this.#y -= otherVector.y;
+		this.#z -= otherVector.z;
+
+		return this;
+	}
+
+	static mult(vector, scalar) {
+		return new Vector(
+			vector.x * scalar,
+			vector.y * scalar,
+			vector.z * scalar
+		);
+	}
+
 	mult(scalar) {
-		return new Vector(this.#x * scalar, this.#y * scalar, this.#z * scalar);
+		this.#x *= scalar;
+		this.#y *= scalar;
+		this.#z *= scalar;
+
+		return this;
+	}
+
+	static div(vector, scalar) {
+		return new Vector(
+			vector.x / scalar,
+			vector.y / scalar,
+			vector.z / scalar
+		);
 	}
 
 	div(scalar) {
-		return new Vector(this.#x / scalar, this.#y / scalar, this.#z / scalar);
+		this.#x /= scalar;
+		this.#y /= scalar;
+		this.#z /= scalar;
+
+		return this;
+	}
+
+	static magnitude(vector) {
+		return Math.sqrt(
+			Math.pow(vector.x, 2) +
+				Math.pow(vector.y, 2) +
+				Math.pow(vector.z, 2)
+		);
 	}
 
 	magnitude() {
@@ -58,26 +107,68 @@ export default class Vector {
 		);
 	}
 
+	static normalize(vector) {
+		return vector.div(vector.magnitude());
+	}
+
 	normalize() {
-		return this.div(this.magnitude());
+		this.div(this.magnitude());
+
+		return this;
+	}
+
+	static dist(vector, otherVector) {
+		let newVec = Vector.sub(vector, otherVector);
+		return Math.sqrt(Math.pow(newVec.x, 2) + Math.pow(newVec.y, 2));
 	}
 
 	dist(otherVector) {
-		let newVec = this.sub(otherVector);
+		let newVec = Vector.sub(this, otherVector);
 		return Math.sqrt(Math.pow(newVec.x, 2) + Math.pow(newVec.y, 2));
+	}
+
+	static limit(vector, max) {
+		let mag = Math.pow(vector.magnitude(), 2);
+		if (mag > Math.pow(max, 2)) {
+			return vector.normalize().mult(max);
+		}
+		return vector;
 	}
 
 	limit(max) {
 		let mag = Math.pow(this.magnitude(), 2);
-		// console.log(this);
 		if (mag > Math.pow(max, 2)) {
-			return this.normalize().mult(max);
+			this.normalize();
+			this.mult(max);
 		}
+
 		return this;
 	}
 
-	// Only consider Vector direction and set new magnitude to X value
+	static setMagnitude(vector, x) {
+		return vector.normalize().mult(x);
+	}
+
 	setMagnitude(x) {
-		return this.normalize().mult(x);
+		this.normalize();
+		this.mult(x);
+
+		return this;
+	}
+
+	static getAngle(vector, deg) {
+		let angle = Math.atan2(vector.y, vector.x);
+		if (deg === 'deg') {
+			angle = angle * (180 / Math.PI);
+		}
+		return angle;
+	}
+
+	getAngle(deg = false) {
+		let angle = Math.atan2(this.#y, this.#x);
+		if (deg === 'deg') {
+			angle *= 180 / Math.PI;
+		}
+		return angle;
 	}
 }
