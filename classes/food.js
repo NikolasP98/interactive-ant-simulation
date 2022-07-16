@@ -6,9 +6,11 @@ const settings = {
 
 export default class Food {
 	static debug = false;
+	static foodSize = settings.foodSize;
 
 	constructor(x, y) {
 		this.position = new Vector(Math.floor(x), Math.floor(y));
+		this.held = false;
 	}
 
 	static debugger(gui) {
@@ -16,21 +18,21 @@ export default class Food {
 			this.debug = true;
 
 			const foodFolder = gui.addFolder('Food');
-			foodFolder.add(settings, 'foodSize', 0, 20, 1);
+			foodFolder.add(Food, 'foodSize', 0, 20, 1);
 		}
 	}
 
-	#draw(ctx) {
+	show(ctx) {
 		ctx.fillStyle = 'green';
 		ctx.fillRect(
-			this.position.x - settings.foodSize / 2,
-			this.position.y - settings.foodSize / 2,
-			settings.foodSize,
-			settings.foodSize
+			this.position.x - Food.foodSize / 2,
+			this.position.y - Food.foodSize / 2,
+			Food.foodSize,
+			Food.foodSize
 		);
 	}
 
 	update(ctx) {
-		this.#draw(ctx);
+		this.show(ctx);
 	}
 }

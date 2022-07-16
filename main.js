@@ -1,13 +1,32 @@
 import GUI from 'lil-gui';
-import { Colony, Food, getRandom } from './classes';
+import { Colony, Ant, Food, getRandom } from './classes';
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 let gui;
 
-const foodArray = [];
-const colonyArray = [];
+const settings = {
+	clickBody: 'colony',
+	foodClick: 4,
+};
+
+const colonyArray = new Set();
+
+const generateFood = (foodBits, position = false) => {
+	const range = 20;
+	for (let i = 0; i < foodBits; i++) {
+		const coords = {
+			x:
+				getRandom(position.x - range, position.x + range) ||
+				getRandom(0, canvas.width),
+			y:
+				getRandom(position.y - range, position.y + range) ||
+				getRandom(0, canvas.height),
+		};
+		Ant.foodSet.add(new Food(coords.x, coords.y));
+	}
+};
 
 const setup = () => {
 	canvas.width = window.innerWidth;
@@ -18,11 +37,27 @@ const setup = () => {
 
 	const foodBits = 20;
 
-	for (let i = 0; i < foodBits; i++) {
-		foodArray.push(
-			new Food(getRandom(0, canvas.width), getRandom(0, canvas.height))
-		);
-	}
+	generateFood(foodBits);
+
+	canvas.addEventListener('click', (e) => {
+		// colonyArray.add(new Colony(e.x, e.y, 20));
+
+		switch (settings.clickBody) {
+			case 'colony':
+				colonyArray.add(new Colony(e.x, e.y, 20));
+				break;
+			case 'ant':
+				console.log('ant');
+				break;
+			case 'food':
+				generateFood(settings.foodClick, { x: e.x, y: e.y });
+				break;
+
+			default:
+				console.log('inexistent tool');
+				break;
+		}
+	});
 
 	window.requestAnimationFrame(animate);
 };
@@ -31,7 +66,11 @@ const animate = () => {
 	ctx.clearRect(0, 0, canvas.width, canvas.height);
 	// MAIN ANIMATION CODE START
 
-	for (let food of foodArray) {
+	for (let ph of Ant.pheromoneSet) {
+		ph.update(ctx);
+	}
+
+	for (let food of Ant.foodSet) {
 		food.update(ctx);
 	}
 
@@ -50,10 +89,15 @@ const animate = () => {
 window.onload = () => {
 	gui = new GUI();
 
-	canvas.addEventListener('click', (e) => {
-		console.log(typeof foodArray);
-		colonyArray.push(new Colony(e.x, e.y, 20, foodArray));
-	});
+	const brush = gui.addFolder('Brush');
+	brush
+		.add(settings, 'clickBody', {
+			'Add Colony': 'colony',
+			'Add Ant': 'ant',
+			'Add Food': 'food',
+		})
+		.name('Click Function');
+	brush.add(settings, 'foodClick', 1, 20, 1).name('Food Bits');
 
 	canvas.addEventListener('contextmenu', (e) => {
 		console.log('right click');
