@@ -28,7 +28,8 @@ export default class Pheromone {
 	show(ctx) {
 		ctx.fillStyle = this.color;
 		if (this.type == 'food') {
-			ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+			const alpha = this.lifeTime / settings.lifeTime;
+			ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
 		}
 
 		ctx.fillRect(

@@ -40,19 +40,13 @@ const setup = () => {
 	generateFood(foodBits);
 
 	canvas.addEventListener('click', (e) => {
-		// colonyArray.add(new Colony(e.x, e.y, 20));
-
 		switch (settings.clickBody) {
 			case 'colony':
 				colonyArray.add(new Colony(e.x, e.y, 20));
 				break;
-			case 'ant':
-				console.log('ant');
-				break;
 			case 'food':
 				generateFood(settings.foodClick, { x: e.x, y: e.y });
 				break;
-
 			default:
 				console.log('inexistent tool');
 				break;
@@ -93,7 +87,6 @@ window.onload = () => {
 	brush
 		.add(settings, 'clickBody', {
 			'Add Colony': 'colony',
-			'Add Ant': 'ant',
 			'Add Food': 'food',
 		})
 		.name('Click Function');

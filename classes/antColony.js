@@ -2,7 +2,7 @@ import Ant from './ant.js';
 import Vector from './vector.js';
 
 const settings = {
-	maxPopulation: 1,
+	maxPopulation: 20,
 };
 export default class Colony {
 	static debug = false;
@@ -26,7 +26,7 @@ export default class Colony {
 			Colony.debug = true;
 
 			const colonyFolder = gui.addFolder('Colony');
-			colonyFolder.add(settings, 'maxPopulation', 0, 20, 1);
+			colonyFolder.add(settings, 'maxPopulation', 0, 40, 1);
 
 			Ant.debugger(gui);
 		}
@@ -43,7 +43,13 @@ export default class Colony {
 		}, ms);
 	}
 
-	#draw(ctx) {
+	show(ctx) {
+		ctx.fillStyle = 'white';
+		ctx.fillText(
+			this.foodCount,
+			this.position.x + this.size,
+			this.position.y
+		);
 		ctx.fillStyle = this.color;
 		ctx.fillRect(
 			this.position.x - this.size / 2,
@@ -51,13 +57,12 @@ export default class Colony {
 			this.size,
 			this.size
 		);
-		ctx.fillText(this.foodCount, this.position.x, this.position.y);
 	}
 
 	update(ctx) {
 		for (let ant of this.#ants) {
 			ant.update(ctx);
 		}
-		this.#draw(ctx);
+		this.show(ctx);
 	}
 }
