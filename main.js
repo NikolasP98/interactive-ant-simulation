@@ -1,10 +1,16 @@
 import GUI from 'lil-gui';
+import { Application, Sprite, Assets } from 'pixijs';
 import { Colony, Ant, Food, getRandom } from './classes';
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 let gui;
+
+const app = new Application();
+document.body.appendChild(app.view);
+
+console.log(app);
 
 const settings = {
 	clickBody: 'colony',
@@ -53,7 +59,8 @@ const setup = () => {
 		}
 	});
 
-	window.requestAnimationFrame(animate);
+	// animate()
+	// window.requestAnimationFrame(animate);
 };
 
 const animate = () => {
@@ -73,8 +80,27 @@ const animate = () => {
 	}
 
 	// MAIN ANIMATION CODE END
-	window.requestAnimationFrame(animate);
 };
+
+// const animate = () => {
+// 	ctx.clearRect(0, 0, canvas.width, canvas.height);
+// 	// MAIN ANIMATION CODE START
+
+// 	for (let ph of Ant.pheromoneSet) {
+// 		ph.update(ctx);
+// 	}
+
+// 	for (let food of Ant.foodSet) {
+// 		food.update(ctx);
+// 	}
+
+// 	for (let colony of colonyArray) {
+// 		colony.update(ctx);
+// 	}
+
+// 	// MAIN ANIMATION CODE END
+// 	window.requestAnimationFrame(animate);
+// };
 
 /* ---------------------------
    ----- EVENT LISTENERS -----
@@ -103,3 +129,5 @@ window.onload = () => {
 window.addEventListener('resize', () => {
 	setup();
 });
+
+app.ticker.add(animate);

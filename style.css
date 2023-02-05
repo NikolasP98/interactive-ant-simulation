@@ -6,7 +6,7 @@
 }
 canvas {
 	position: absolute;
-	background-color: #000;
-	top: 0;
+	/* background-color: #000; */
+	top: 100;
 	left: 0;
 }
