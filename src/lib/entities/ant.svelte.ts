@@ -1,51 +1,18 @@
-import Vector from './vector';
-import Pheromone from './pheromone';
+import { world } from '$stores/worldStore.svelte';
+import Vector from '$utils/vector.svelte';
+import Pheromone from '$ents/pheromone.svelte';
+
+import type { Pheromone, Vector } from '$types';
 
 const settings = {
 	wanderStrength: 2.5,
 	steerForce: 1,
 
 	perceptionRadius: 100,
-	showRadius: true,
+	showRadius: true
 };
+
 export default class Ant {
-	static debug = false;
-	static foodSet = new Set();
-	static pheromoneSet = new Set();
-
-	constructor(
-		x = 0,
-		y = 0,
-		colony = null,
-		radius = 5,
-
-		showRadius = true
-	) {
-		this.position = new Vector(x, y);
-		this.velocity = new Vector();
-		this.acceleration = new Vector();
-		this.theta = 0;
-
-		this.hasFood = false;
-
-		this.inventory = null;
-
-		this.colony = colony;
-
-		this.maxSpeed = 1;
-		this.maxForce = 0.01;
-
-		this.radius = radius;
-		this.color = colony.color || 'white';
-
-		this.showRadius = showRadius;
-		this.perceptionRadius = 100;
-
-		this.strength = 1;
-
-		this.layPheromones();
-	}
-
 	static debugger(gui) {
 		if (!Ant.debug) {
 			Ant.debug = true;
@@ -59,32 +26,91 @@ export default class Ant {
 		}
 	}
 
-	layPheromones() {
-		setInterval(() => {
-			Ant.pheromoneSet.add(
-				new Pheromone(
-					this.position.x,
-					this.position.y,
-					this.colony.color,
-					this.hasFood ? 'food' : 'home'
-				)
-			);
-		}, 500);
+	private colonyID: string;
+
+	private nearbyPheromones: Pheromone[] = $state([]);
+	private nearbyAnts: Ant[] = $state([]);
+	private nearbyFood: Food[] = $state([]);
+
+	private showRadius: boolean = $state(settings.showRadius);
+	private hasFood: boolean = $state(false);
+
+	private inventory: number = $state(0);
+	private perceptionRadius: number = $state(0);
+	private strength: number = $state(0);
+
+	private position: Vector = $state(new Vector());
+	private velocity: Vector = $state(new Vector());
+	private acceleration: Vector = $state(new Vector());
+	private theta: number = $state(0);
+	private maxSpeed: number = $state(1);
+	private maxForce: number = $state(0.01);
+
+	private radius: number = $state();
+	private color: string = $state('#fff');
+
+	private debug: boolean = $state(false);
+	constructor(
+		x,
+		y,
+		settings?: {
+			colony: Colony;
+			wanderStrength: number;
+			steerForce: number;
+			perceptionRadius: number;
+			showRadius: boolean;
+		}
+	) {
+		this.position = new Vector(x, y);
+
+		this.colony = settings.colony;
+
+		this.color = 'white';
+		// this.color = this.colony.color || 'white';
+
+		this.showRadius = this.showRadius;
+		this.perceptionRadius = 100;
+
+		// this.world.addAnt(this);
+
+		console.log(this);
+
+		this.layPheromones();
 	}
 
-	followPheromone(pheromones, type) {
-		const getPheromones = Array.from(pheromones).filter((ph) => {
-			const d = this.position.dist(ph.position);
-			return ph.type == type && d <= settings.perceptionRadius;
-		});
+	layPheromones() {
+		// setInterval(() => {
+		// 	Ant.pheromoneSet.add(
+		// 		new Pheromone(
+		// 			this.position.x,
+		// 			this.position.y,
+		// 			this.colony.color,
+		// 			this.hasFood ? 'food' : 'home'
+		// 		)
+		// 	);
+		// }, 500);
+	}
 
-		if (getPheromones.length) {
-			const bestPheromone = getPheromones.reduce((a, b) => {
-				return a.lifeTime < b.lifeTime ? a : b;
-			});
-			return this.seek(bestPheromone.position);
-		}
-		return new Vector();
+	/*************  ✨ Codeium Command ⭐  *************/
+	/**
+	 * Follows the strongest pheromone of the given type within perception radius.
+	 * @param pheromones Set of pheromones to search in
+	 * @param type Type of pheromone to follow
+	 * @returns Steering force to follow the pheromone
+	 */
+	/******  cc657bb4-6b79-4e9e-965a-e9d698c8d50e  *******/
+	followPheromone(pheromones, type) {
+		// const getPheromones = Array.from(pheromones).filter((ph) => {
+		// 	const d = this.position.dist(ph.position);
+		// 	return ph.type == type && d <= settings.perceptionRadius;
+		// });
+		// if (getPheromones.length) {
+		// 	const bestPheromone = getPheromones.reduce((a, b) => {
+		// 		return a.lifeTime < b.lifeTime ? a : b;
+		// 	});
+		// 	return this.seek(bestPheromone.position);
+		// }
+		// return new Vector();
 	}
 
 	seek(target) {
@@ -107,29 +133,27 @@ export default class Ant {
 		food.position = this.position;
 	}
 
-	dropOff() {
+	unload = () => {
 		if (this.hasFood) {
 			this.hasFood = false;
 			this.color = this.colony.color || 'white';
 			this.colony.foodCount++;
 
-			Ant.foodSet.delete(this.inventory)
-				? Ant.foodSet.has(this.inventory)
-				: null;
+			Ant.foodSet.delete(this.inventory) ? Ant.foodSet.has(this.inventory) : null;
 
 			this.inventory = null;
 		}
-	}
+	};
 
-	getFood(foodSet, pheromones = []) {
+	getFood = (nearbyFood, nearbyPheromones = []) => {
 		let best = new Vector();
 		let dist = 99999;
 
-		if (!foodSet.size) {
+		if (!nearbyFood.length) {
 			return best;
 		}
 
-		for (const food of foodSet) {
+		for (const food of nearbyFood) {
 			const d = this.position.dist(food.position);
 			if (d < settings.perceptionRadius && !food.held) {
 				if (d < dist) {
@@ -147,20 +171,20 @@ export default class Ant {
 			return this.seek(best);
 		}
 
-		return this.followPheromone(pheromones, 'food');
-	}
+		return this.followPheromone(nearbyPheromones, 'food');
+	};
 
-	findHome(pheromones) {
+	findHome = (pheromones) => {
 		const homeDist = this.position.dist(this.colony.position);
 		if (homeDist < settings.perceptionRadius) {
 			if (homeDist < 10) {
-				this.dropOff();
+				this.unload();
 			}
 			return this.seek(this.colony.position);
 		}
 
 		return this.followPheromone(pheromones, 'home');
-	}
+	};
 
 	edges() {
 		if (this.position.x > canvas.width) {
@@ -190,13 +214,9 @@ export default class Ant {
 		let steeringForce = new Vector();
 
 		if (this.hasFood) {
-			steeringForce = this.findHome(Ant.pheromoneSet).mult(
-				settings.steerForce
-			);
+			steeringForce = this.findHome(Ant.pheromoneSet).mult(settings.steerForce);
 		} else {
-			steeringForce = this.getFood(Ant.foodSet, Ant.pheromoneSet).mult(
-				settings.steerForce
-			);
+			steeringForce = this.getFood(Ant.foodSet, Ant.pheromoneSet).mult(settings.steerForce);
 		}
 
 		// mandatory wander
@@ -210,13 +230,7 @@ export default class Ant {
 			ctx.strokeStyle = 'rgba(255,255,255, 0.5)';
 
 			ctx.beginPath();
-			ctx.arc(
-				this.position.x,
-				this.position.y,
-				settings.perceptionRadius,
-				0,
-				2 * Math.PI
-			);
+			ctx.arc(this.position.x, this.position.y, settings.perceptionRadius, 0, 2 * Math.PI);
 			ctx.closePath();
 			ctx.stroke();
 		}
@@ -238,7 +252,7 @@ export default class Ant {
 	}
 
 	update(ctx) {
-		this.theta = this.velocity.getAngle();
+		this.theta = this.velocity.angle;
 
 		this.walk();
 		this.position.add(this.velocity);

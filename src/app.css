@@ -1,0 +1,27 @@
+* {
+	padding: 0;
+	margin: 0;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+}
+canvas {
+	background-color: #000;
+	position: absolute;
+	top: 0;
+	left: 0;
+}
+
+.debug {
+	position: absolute;
+	top: 0;
+	left: 0;
+
+	background-color: rgba(150, 10, 50, 0.3);
+	color: #fff;
+	margin: 10px;
+	padding: 5px;
+
+	font-size: 20px;
+	font-style: bold;
+	font-family: monospace;
+}

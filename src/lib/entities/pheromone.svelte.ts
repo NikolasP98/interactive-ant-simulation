@@ -1,9 +1,9 @@
-import Vector from './vector';
-import Ant from './ant';
+import Vector from '$utils/vector.svelte';
+import Ant from '$ents/ant.svelte';
 
 const settings = {
 	lifeTime: 1000,
-	size: 1.3,
+	size: 1.3
 };
 
 export default class Pheromone {

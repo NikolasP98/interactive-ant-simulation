@@ -1,7 +1,7 @@
-import Vector from './vector.js';
+import Vector from '$utils/vector.svelte';
 
 const settings = {
-	foodSize: 5,
+	foodSize: 5
 };
 
 export default class Food {
