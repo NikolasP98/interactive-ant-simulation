@@ -47,8 +47,8 @@ export default class Vector2D {
 		}
 	}
 
-	private x: number = $state(null);
-	private y: number = $state(null);
+	public x: number = $state(0);
+	public y: number = $state(0);
 
 	constructor(newX?: number, newY?: number) {
 		this.x = newX || 0;
@@ -59,10 +59,6 @@ export default class Vector2D {
 	// toString(radix = 10) {
 	// 	return `${x.toString(radix)},${y.toString(radix)}`;
 	// }
-
-	get coords() {
-		return [this.x, this.y];
-	}
 
 	get magnitude() {
 		return Math.hypot(this.x, this.y);
@@ -89,79 +85,100 @@ export default class Vector2D {
 
 	// === INSTANCE METHODS ===
 
-	distance(v) {
-		return Math.hypot(this.x - v.x, this.y - v.y);
-	}
+	limit = (max): Vector2D => {
+		if (this.sqrMag > max * max) {
+			this.normalize();
+			this.multiply(max);
+		}
+		return this;
+	};
 
-	dot(v) {
-		return v.x * x + v.y * y;
-	}
+	distance = (v): number => {
+		return Math.hypot(this.x - v.x, this.y - v.y);
+	};
+
+	dot = (v): number => {
+		return v.x * this.x + v.y * this.y;
+	};
 
 	// === UNARY METHODS (SETTERS W/ NO INPUT) ===
 
-	zero() {
-		x = 0;
-		y = 0;
+	zero = (): Vector2D => {
+		this.x = 0;
+		this.y = 0;
 		return this;
-	}
+	};
 
-	normalize() {
-		let l = sqrMag();
+	normalize = (): Vector2D => {
+		let l = this.sqrMag;
 		if (l > 0) {
 			l = 1 / Math.sqrt(l);
 		}
-		x *= l;
-		y *= l;
+		this.x *= l;
+		this.y *= l;
 		return this;
-	}
+	};
 
 	// === SCALAR INPUT METHODS ===
 
-	randomize(scale = 1) {
+	randomize = (scale = 1): Vector2D => {
 		const r = Math.random() * 2.0 * Math.PI;
-		x = Math.cos(r) * scale;
-		y = Math.sin(r) * scale;
+		this.x = Math.cos(r) * scale;
+		this.y = Math.sin(r) * scale;
 		return this;
-	}
+	};
 
-	multiply(scale) {
-		x *= scale;
-		y *= scale;
+	multiply = (scale): Vector2D => {
+		this.x *= scale;
+		this.y *= scale;
 		return this;
-	}
+	};
 
-	divide(scale) {
-		x /= scale;
-		y /= scale;
+	divide = (scale): Vector2D => {
+		this.x /= scale;
+		this.y /= scale;
 		return this;
-	}
+	};
 
-	rotate(angle) {
+	rotate = (angle): Vector2D => {
 		const cos = Math.cos(angle);
 		const sin = Math.sin(angle);
-		const rx = x * cos - y * sin;
-		y = x * sin + y * cos;
-		x = rx;
+		const rx = this.x * cos - this.y * sin;
+		this.y = this.x * sin + this.y * cos;
+		this.x = rx;
 		return this;
-	}
+	};
 
 	// === VECTOR INPUT METHODS ===
 
-	add(v) {
-		x += v.x;
-		y += v.y;
+	add = (v): Vector2D => {
+		this.x += v.x;
+		this.y += v.y;
 		return this;
-	}
+	};
 
-	subtract(v) {
-		x -= v.x;
-		y -= v.y;
+	subtract = (v): Vector2D => {
+		this.x -= v.x;
+		this.y -= v.y;
 		return this;
-	}
+	};
 
-	sclAdd(v, scale) {
-		x += v.x * scale;
-		y += v.y * scale;
+	sclAdd = (v, scale): Vector2D => {
+		this.x += v.x * scale;
+		this.y += v.y * scale;
 		return this;
-	}
+	};
+
+	follow = (target: Vector2D, maxSpeed: number, maxForce: number): Vector2D => {
+		const desiredVelocity = target.subtract(this).normalize().multiply(maxSpeed);
+		const steerForce = desiredVelocity.subtract(this.velocity).limit(maxForce);
+
+		this.acceleration.add(steerForce);
+
+		return this;
+	};
+
+	clone = (): Vector2D => {
+		return new Vector2D(this.x, this.y);
+	};
 }

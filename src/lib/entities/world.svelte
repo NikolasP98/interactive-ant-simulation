@@ -2,7 +2,7 @@
 	import { world } from '$stores/worldStore.svelte';
 	import { onMount } from 'svelte';
 
-	// Run Simulation
+	import GUI from '$utils/debugGUI.svelte';
 
 	let canvas_el: HTMLCanvasElement;
 
@@ -14,8 +14,6 @@
 
 		world.setup(canvas_el, dimensions);
 
-		$inspect(world.cols);
-
 		return () => {
 			world.destroy();
 		};
@@ -24,6 +22,13 @@
 	// export world = new World();
 </script>
 
-<canvas bind:this={canvas_el} id="canvas"></canvas>
+<GUI />
 
-<svelte:window bind:innerHeight={dimensions.y} bind:innerWidth={dimensions.x} />
+<canvas
+	bind:this={canvas_el}
+	bind:clientWidth={dimensions.x}
+	bind:clientHeight={dimensions.y}
+	id="canvas"
+></canvas>
+
+<!-- <svelte:window bind:innerHeight={dimensions.y} bind:innerWidth={dimensions.x} /> -->

@@ -1,4 +1,4 @@
-import Ant from '$ents/ant.svelte';
+import Ant from '$lib/entities/ant.svelte';
 import Vector from '$utils/vector.svelte';
 
 const settings = {
@@ -19,27 +19,35 @@ export default class Colony {
 	}
 
 	private ants: Ant[] = $state([]);
+	private antCount: number = $derived(() => this.ants.length);
 	private foodCount: number = $state(0);
 	private maxPopulation: number = $state(settings.maxPopulation);
 	private color: string = $state('white');
 	private position: Vector = $state<Vector>(new Vector());
 
+	/**
+	 * Constructor for a new colony.
+	 * @param {number} [x=0] - The x position of the colony.
+	 * @param {number} [y=0] - The y position of the colony.
+	 */
 	constructor(x?: number | undefined, y?: number | undefined) {
 		this.position = new Vector(x || 0, y || 0);
 		this.size = 20;
 
 		this.color = `#${Math.floor(Math.random() * 16777215).toString(16)}`;
-
-		// this.createAnt();
+		this.createAnt();
 	}
 
-	createAnt = async (ms = 200) => {
-		await setTimeout(() => {
-			if (this.ants.length < this.maxPopulation) {
-				this.ants.push(new Ant(this.position.x, this.position.y, { colony: this }));
-				this.createAnt(ms);
-			}
-		}, ms);
+	/**
+	 * Creates a new ant every ms milliseconds.
+	 * @param {number} [ms=200] - The time in milliseconds between each ant is created.
+	 * @returns {Promise<void>}
+	 */
+	createAnt = async (ms = 200): Promise<void> => {
+		while (this.ants.length < this.maxPopulation) {
+			await new Promise((resolve) => setTimeout(resolve, ms));
+			this.ants.push(new Ant(this.position.x, this.position.y, { colony: this }));
+		}
 	};
 
 	show(ctx) {
@@ -55,9 +63,9 @@ export default class Colony {
 	}
 
 	update(ctx) {
+		this.show(ctx);
 		for (let ant of this.ants) {
 			ant.update(ctx);
 		}
-		this.show(ctx);
 	}
 }

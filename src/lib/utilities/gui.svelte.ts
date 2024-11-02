@@ -1,22 +1,22 @@
 import GUI from 'lil-gui';
 
 const settings = {
-	brush = {
-		clickAction: 'colony',
+	brush: {
+		clickAction: 'COLONY',
 		foodClickAmount: 4
 	}
 };
 
-export default function setupGUI() {
-	const gui = new GUI();
+export default class appGUI extends GUI {
+	constructor(settings = {}) {
+		super();
+	}
 
-	const brushFolder = gui.addFolder('Brush');
-	brushFolder
-		.add(settings.brush, 'clickAction', {
-			'Add Colony': 'colony',
-			'Add Food': 'food'
-		})
-		.name('Click Function');
-
-	brushFolder.add(settings.brush, 'foodClickAmount', 1, 20, 1).name('Food Bits');
+	/**
+	 * Destroys the GUI and removes all event listeners.
+	 * @description This function should be called when the app is closed, to prevent memory leaks.
+	 */
+	destroy() {
+		this.destroy();
+	}
 }

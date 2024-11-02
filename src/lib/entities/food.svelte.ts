@@ -1,38 +1,41 @@
 import Vector from '$utils/vector.svelte';
+import Item from './item.svelte';
+import { world } from '$stores/worldStore.svelte';
+import dbg from '$stores/GUISettings.svelte';
 
-const settings = {
-	foodSize: 5
-};
+export default class Food extends Item {
+	private held: boolean = $state(false);
+	private color: string = $state('green');
 
-export default class Food {
-	static debug = false;
-	static foodSize = settings.foodSize;
-
-	constructor(x, y) {
-		this.position = new Vector(Math.floor(x), Math.floor(y));
-		this.held = false;
+	/**
+	 * Creates a new food item at the given position.
+	 * @param {number} options.x - The x-coordinate of the food item.
+	 * @param {number} options.y - The y-coordinate of the food item.
+	 */
+	constructor({ x, y }) {
+		super(x, y);
+		// this.foodSize = foodSize || settings.foodSize;
 	}
 
-	static debugger(gui) {
-		if (!this.debug) {
-			this.debug = true;
+	private show = () => {
+		const ctx = world.ctx;
 
-			const foodFolder = gui.addFolder('Food');
-			foodFolder.add(Food, 'foodSize', 0, 20, 1);
-		}
-	}
+		if (!ctx) return;
 
-	show(ctx) {
-		ctx.fillStyle = 'green';
+		const foodSize = dbg.foodSettings.foodSize;
+
+		ctx.fillStyle = this.color;
 		ctx.fillRect(
-			this.position.x - Food.foodSize / 2,
-			this.position.y - Food.foodSize / 2,
-			Food.foodSize,
-			Food.foodSize
+			this.position.x - foodSize / 2,
+			this.position.y - foodSize / 2,
+			foodSize,
+			foodSize
 		);
-	}
 
-	update(ctx) {
-		this.show(ctx);
-	}
+		// console.log(dbg.foodSettings.foodSize);
+	};
+
+	update = () => {
+		this.show();
+	};
 }

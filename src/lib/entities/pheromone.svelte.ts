@@ -1,5 +1,5 @@
 import Vector from '$utils/vector.svelte';
-import Ant from '$ents/ant.svelte';
+import Ant from '$lib/entities/ant.svelte';
 
 const settings = {
 	lifeTime: 1000,
