@@ -26,7 +26,7 @@
 	let playing = $state(true);
 	let showSignals = $state(true);
 	let showVision = $state(true);
-	let population = $state(52);
+	let population = $state(72);
 	let persistence = $state(68);
 	let diffusion = $state(46);
 	let simSpeed = $state(1);
@@ -199,6 +199,18 @@
 		}
 
 		if (showSignals) {
+			const maxima = simulation.homeTrail.reduce(
+				(result, home, index) => ({
+					home: Math.max(result.home, home),
+					food: Math.max(result.food, simulation!.foodTrail[index]),
+					warning: Math.max(result.warning, simulation!.warningTrail[index])
+				}),
+				{ home: 0.001, food: 0.001, warning: 0.001 }
+			);
+			const cellSize = Math.max(
+				1.3,
+				Math.min(fieldWidth / simulation.columns, fieldHeight / simulation.rows)
+			);
 			for (let row = 0; row < simulation.rows; row += 1) {
 				for (let column = 0; column < simulation.columns; column += 1) {
 					const index = row * simulation.columns + column;
@@ -210,12 +222,37 @@
 						-simulation.width / 2 + ((column + 0.5) / simulation.columns) * simulation.width,
 						-simulation.depth / 2 + ((row + 0.5) / simulation.rows) * simulation.depth
 					);
-					const value = Math.max(home, food, warning);
-					context.globalAlpha = 0.22 + value * 0.7;
-					context.fillStyle = warning > Math.max(home, food) ? '#d34b83' : food > home ? '#ff6848' : '#2ba9eb';
-					context.beginPath();
-					context.arc(point.x, point.y, 1.25 + value * 2, 0, Math.PI * 2);
-					context.fill();
+					if (food >= Math.max(0.008, maxima.food * 0.035)) {
+						const strength = Math.sqrt(food / maxima.food);
+						context.globalAlpha = 0.28 + strength * 0.62;
+						context.strokeStyle = '#ff6848';
+						context.lineWidth = Math.max(0.7, cellSize * 0.16);
+						context.beginPath();
+						context.arc(point.x, point.y, cellSize * (0.3 + strength * 0.26), 0, Math.PI * 2);
+						context.stroke();
+					}
+					if (home >= Math.max(0.008, maxima.home * 0.035)) {
+						const strength = Math.sqrt(home / maxima.home);
+						context.globalAlpha = 0.34 + strength * 0.66;
+						context.fillStyle = '#168fd2';
+						context.beginPath();
+						context.arc(point.x, point.y, cellSize * (0.12 + strength * 0.16), 0, Math.PI * 2);
+						context.fill();
+					}
+					if (warning >= Math.max(0.018, maxima.warning * 0.11)) {
+						const strength = Math.sqrt(warning / maxima.warning);
+						const radius = cellSize * (0.2 + strength * 0.2);
+						context.globalAlpha = 0.34 + strength * 0.58;
+						context.strokeStyle = '#b72f6b';
+						context.lineWidth = Math.max(0.75, cellSize * 0.16);
+						context.beginPath();
+						context.moveTo(point.x, point.y - radius);
+						context.lineTo(point.x + radius, point.y);
+						context.lineTo(point.x, point.y + radius);
+						context.lineTo(point.x - radius, point.y);
+						context.closePath();
+						context.stroke();
+					}
 				}
 			}
 			context.globalAlpha = 1;
@@ -546,11 +583,11 @@
 					? 'CLICK FIELD TO MOVE RICH FOOD'
 					: 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
 		</div>
-		{#if view === 'signals' || showVision}
+		{#if view === 'signals' || showSignals || showVision}
 			<div class="signal-key">
 				<div class="field-legend">
-					<span class="home-dot"></span> HOME
-					<span class="food-dot"></span> FOOD
+					<span class="home-dot"></span> HOME CORE
+					<span class="food-dot"></span> FOOD HALO
 					<span class="warning-dot"></span> DOUBT
 				</div>
 				{#if showVision}
@@ -598,7 +635,7 @@
 		{#if view === 'habitat'}
 			<label>
 				<span>FORAGERS <output>{population}</output></span>
-				<input type="range" min="12" max={resourcePreset === 'conserve' ? 64 : 100} bind:value={population} oninput={persistSettings} />
+				<input type="range" min="12" max={resourcePreset === 'conserve' ? 72 : resourcePreset === 'full' ? 160 : 120} bind:value={population} oninput={persistSettings} />
 			</label>
 			<label>
 				<span>TIME SCALE <output>{simSpeed.toFixed(1)}×</output></span>
@@ -620,7 +657,7 @@
 			</label>
 			<label>
 				<span>FORAGERS <output>{population}</output></span>
-				<input type="range" min="12" max={resourcePreset === 'conserve' ? 64 : 100} bind:value={population} oninput={persistSettings} />
+				<input type="range" min="12" max={resourcePreset === 'conserve' ? 72 : resourcePreset === 'full' ? 160 : 120} bind:value={population} oninput={persistSettings} />
 			</label>
 		{/if}
 		<label class="select-control">

@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { ColonySimulation } from '$lib/simulation';
 
 describe('colony simulation', () => {
+	it('opens a larger habitat without unbounding the pheromone grid', () => {
+		const colony = new ColonySimulation('expanded-habitat-test');
+		colony.resizePopulation(200);
+
+		expect(colony.width).toBe(30);
+		expect(colony.depth).toBe(20);
+		expect(colony.columns * colony.rows).toBeLessThanOrEqual(5_400);
+		expect(colony.ants).toHaveLength(160);
+	});
+
 	it('keeps the requested population inside the habitat and outside obstacles', () => {
 		const colony = new ColonySimulation('population-test', { population: 24 });
 		const obstacle = colony.addObstacleOnRoute();

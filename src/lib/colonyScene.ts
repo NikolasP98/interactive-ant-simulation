@@ -6,7 +6,7 @@ export type ColonyView = 'habitat' | 'signals' | 'map';
 export type ResourcePreset = 'conserve' | 'balanced' | 'full';
 export type VisionStatus = 'search' | 'signal' | 'return' | 'recover';
 
-const maximumAnts = 120;
+const maximumAnts = 160;
 
 const scratch = new THREE.Object3D();
 const scratchColor = new THREE.Color();
@@ -144,7 +144,7 @@ export class ColonyScene {
 	private legMeshes: THREE.InstancedMesh[] = [];
 	private antennaMeshes: THREE.InstancedMesh[] = [];
 	private cargoMesh: THREE.InstancedMesh;
-	private pheromones: THREE.InstancedMesh;
+	private pheromoneMeshes: Record<'home' | 'food' | 'warning', THREE.InstancedMesh>;
 	private pheromoneSpotScale = 1;
 	private visionCones: THREE.InstancedMesh;
 	private visionRays: THREE.LineSegments;
@@ -174,12 +174,12 @@ export class ColonyScene {
 		this.renderer.shadowMap.enabled = preset === 'full';
 		this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-		this.camera.position.set(12, 10, 12);
+		this.camera.position.set(20, 16, 20);
 		this.controls = new OrbitControls(this.camera, canvas);
 		this.controls.enableDamping = true;
 		this.controls.dampingFactor = 0.08;
 		this.controls.enablePan = false;
-		this.controls.minZoom = 0.62;
+		this.controls.minZoom = 0.5;
 		this.controls.maxZoom = 2.35;
 		this.controls.minPolarAngle = 0.16;
 		this.controls.maxPolarAngle = Math.PI / 2.16;
@@ -237,7 +237,7 @@ export class ColonyScene {
 			{ geometry: new THREE.SphereGeometry(0.075, 10, 7), offset: 0.15, scale: [1, 0.74, 0.9] }
 		];
 		for (const part of bodyParts) {
-			const mesh = new THREE.InstancedMesh(part.geometry, antMaterial, 120);
+			const mesh = new THREE.InstancedMesh(part.geometry, antMaterial, maximumAnts);
 			mesh.userData.part = part;
 			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 			mesh.castShadow = preset === 'full';
@@ -249,7 +249,7 @@ export class ColonyScene {
 		const appendageGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.19, 5);
 		const appendageMaterial = new THREE.MeshStandardMaterial({ color: '#3b281d', roughness: 0.86 });
 		for (let index = 0; index < 6; index += 1) {
-			const mesh = new THREE.InstancedMesh(appendageGeometry, appendageMaterial, 120);
+			const mesh = new THREE.InstancedMesh(appendageGeometry, appendageMaterial, maximumAnts);
 			mesh.userData.leg = { pair: Math.floor(index / 2), side: index % 2 === 0 ? -1 : 1 };
 			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 			mesh.frustumCulled = false;
@@ -260,7 +260,7 @@ export class ColonyScene {
 			const mesh = new THREE.InstancedMesh(
 				new THREE.CylinderGeometry(0.009, 0.009, 0.17, 5),
 				appendageMaterial,
-				120
+				maximumAnts
 			);
 			mesh.userData.side = index === 0 ? -1 : 1;
 			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -272,31 +272,48 @@ export class ColonyScene {
 		this.cargoMesh = new THREE.InstancedMesh(
 			new THREE.DodecahedronGeometry(0.075, 0),
 			new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.72 }),
-			120
+			maximumAnts
 		);
 		this.cargoMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 		this.cargoMesh.frustumCulled = false;
 		this.scene.add(this.cargoMesh);
 
-		const maximumPoints = simulation.columns * simulation.rows * 3;
-		this.pheromones = new THREE.InstancedMesh(
-			new THREE.CircleGeometry(0.5, 12),
+		const maximumPoints = simulation.columns * simulation.rows;
+		const signalMaterial = (color: THREE.Color, opacity: number) =>
 			new THREE.MeshBasicMaterial({
+				color,
 				transparent: true,
-				opacity: 0.8,
+				opacity,
 				depthWrite: false,
 				depthTest: true,
 				polygonOffset: true,
 				polygonOffsetFactor: -2,
 				side: THREE.DoubleSide
-			}),
-			maximumPoints
-		);
-		this.pheromones.count = 0;
-		this.pheromones.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-		this.pheromones.frustumCulled = false;
-		this.pheromones.renderOrder = 2;
-		this.scene.add(this.pheromones);
+			});
+		this.pheromoneMeshes = {
+			home: new THREE.InstancedMesh(
+				new THREE.CircleGeometry(0.5, 12),
+				signalMaterial(homeSignalColor, 0.9),
+				maximumPoints
+			),
+			food: new THREE.InstancedMesh(
+				new THREE.RingGeometry(0.3, 0.5, 14),
+				signalMaterial(foodSignalColor, 0.86),
+				maximumPoints
+			),
+			warning: new THREE.InstancedMesh(
+				new THREE.RingGeometry(0.27, 0.5, 4),
+				signalMaterial(warningSignalColor, 0.9),
+				maximumPoints
+			)
+		};
+		for (const [index, mesh] of Object.values(this.pheromoneMeshes).entries()) {
+			mesh.count = 0;
+			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+			mesh.frustumCulled = false;
+			mesh.renderOrder = 2 + index;
+			this.scene.add(mesh);
+		}
 
 		const coneGeometry = new THREE.BufferGeometry();
 		coneGeometry.setAttribute(
@@ -375,17 +392,21 @@ export class ColonyScene {
 		if (view === 'map') return;
 		this.view = view;
 		if (view === 'signals') {
-			this.camera.position.set(0.01, 16.5, 0.01);
-			this.camera.zoom = 0.68;
+			this.camera.position.set(0.01, 27, 0.01);
+			this.camera.zoom = 0.95;
 			this.controls.target.set(0, 0.25, 0);
-			this.pheromoneSpotScale = 1.18;
-			(this.pheromones.material as THREE.MeshBasicMaterial).opacity = 0.9;
+			this.pheromoneSpotScale = 1.16;
+			(this.pheromoneMeshes.home.material as THREE.MeshBasicMaterial).opacity = 0.96;
+			(this.pheromoneMeshes.food.material as THREE.MeshBasicMaterial).opacity = 0.92;
+			(this.pheromoneMeshes.warning.material as THREE.MeshBasicMaterial).opacity = 0.96;
 		} else {
-			this.camera.position.set(12, 10, 12);
-			this.camera.zoom = 1;
+			this.camera.position.set(20, 16, 20);
+			this.camera.zoom = 0.92;
 			this.controls.target.set(0, 0.28, 0);
 			this.pheromoneSpotScale = 1;
-			(this.pheromones.material as THREE.MeshBasicMaterial).opacity = 0.8;
+			(this.pheromoneMeshes.home.material as THREE.MeshBasicMaterial).opacity = 0.82;
+			(this.pheromoneMeshes.food.material as THREE.MeshBasicMaterial).opacity = 0.78;
+			(this.pheromoneMeshes.warning.material as THREE.MeshBasicMaterial).opacity = 0.86;
 		}
 		this.controls.enableRotate = true;
 		this.camera.updateProjectionMatrix();
@@ -397,7 +418,7 @@ export class ColonyScene {
 	}
 
 	setSignalsVisible(visible: boolean): void {
-		this.pheromones.visible = visible;
+		for (const mesh of Object.values(this.pheromoneMeshes)) mesh.visible = visible;
 	}
 
 	setVisionVisible(visible: boolean): void {
@@ -436,7 +457,10 @@ export class ColonyScene {
 		if (!width || !height) return;
 		this.renderer.setSize(width, height, false);
 		const aspect = width / height;
-		const halfHeight = aspect < 1 ? 7.2 : 6.2;
+		const halfHeight =
+			aspect < 1
+				? this.simulation.width / (2 * aspect) + 1.4
+				: Math.max(10.6, this.simulation.depth / 2 + 0.6);
 		this.camera.left = -halfHeight * aspect;
 		this.camera.right = halfHeight * aspect;
 		this.camera.top = halfHeight;
@@ -712,35 +736,70 @@ export class ColonyScene {
 	}
 
 	private updatePheromones(): void {
-		let point = 0;
 		const { columns, rows, width, depth, homeTrail, foodTrail, warningTrail } = this.simulation;
+		let homeMax = 0.001;
+		let foodMax = 0.001;
+		let warningMax = 0.001;
+		for (let index = 0; index < homeTrail.length; index += 1) {
+			homeMax = Math.max(homeMax, homeTrail[index]);
+			foodMax = Math.max(foodMax, foodTrail[index]);
+			warningMax = Math.max(warningMax, warningTrail[index]);
+		}
+		const counts = { home: 0, food: 0, warning: 0 };
+		const fields = [
+			{
+				kind: 'food' as const,
+				trail: foodTrail,
+				maximum: foodMax,
+				threshold: Math.max(0.008, foodMax * 0.035),
+				y: 0.589,
+				minimum: 0.3,
+				range: 0.24
+			},
+			{
+				kind: 'home' as const,
+				trail: homeTrail,
+				maximum: homeMax,
+				threshold: Math.max(0.008, homeMax * 0.035),
+				y: 0.592,
+				minimum: 0.15,
+				range: 0.17
+			},
+			{
+				kind: 'warning' as const,
+				trail: warningTrail,
+				maximum: warningMax,
+				threshold: Math.max(0.018, warningMax * 0.11),
+				y: 0.595,
+				minimum: 0.24,
+				range: 0.2
+			}
+		];
 		for (let row = 0; row < rows; row += 1) {
 			for (let column = 0; column < columns; column += 1) {
 				const index = row * columns + column;
-				for (const [value, color] of [
-					[homeTrail[index], homeSignalColor],
-					[foodTrail[index], foodSignalColor],
-					[warningTrail[index], warningSignalColor]
-				] as const) {
-					if (value < 0.008) continue;
-					const size = (0.14 + Math.sqrt(value) * 0.16) * this.pheromoneSpotScale;
+				for (const field of fields) {
+					const value = field.trail[index];
+					if (value < field.threshold) continue;
+					const strength = Math.sqrt(value / field.maximum);
+					const size = (field.minimum + strength * field.range) * this.pheromoneSpotScale;
 					scratch.position.set(
 						-width / 2 + ((column + 0.5) / columns) * width,
-						0.588,
+						field.y,
 						-depth / 2 + ((row + 0.5) / rows) * depth
 					);
-					scratch.rotation.set(-Math.PI / 2, 0, 0);
+					scratch.rotation.set(-Math.PI / 2, 0, field.kind === 'warning' ? Math.PI / 4 : 0);
 					scratch.scale.set(size, size, 1);
 					scratch.updateMatrix();
-					this.pheromones.setMatrixAt(point, scratch.matrix);
-					scratchColor.copy(color);
-					this.pheromones.setColorAt(point, scratchColor);
-					point += 1;
+					this.pheromoneMeshes[field.kind].setMatrixAt(counts[field.kind], scratch.matrix);
+					counts[field.kind] += 1;
 				}
 			}
 		}
-		this.pheromones.count = point;
-		this.pheromones.instanceMatrix.needsUpdate = true;
-		if (this.pheromones.instanceColor) this.pheromones.instanceColor.needsUpdate = true;
+		for (const kind of ['home', 'food', 'warning'] as const) {
+			const mesh = this.pheromoneMeshes[kind];
+			mesh.count = counts[kind];
+			mesh.instanceMatrix.needsUpdate = true;
+		}
 	}
 }

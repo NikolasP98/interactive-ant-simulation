@@ -131,17 +131,17 @@ function shortestAngle(from: number, to: number): number {
 }
 
 export class ColonySimulation {
-	readonly width = 18;
-	readonly depth = 12;
-	readonly columns = 72;
-	readonly rows = 48;
-	readonly nest = { x: -5.4, z: 2.25 };
+	readonly width = 30;
+	readonly depth = 20;
+	readonly columns = 90;
+	readonly rows = 60;
+	readonly nest = { x: -9.2, z: 3.8 };
 	readonly foods: FoodSource[] = [
 		{
 			id: 'meadow',
 			label: 'NEAR CRUMBS · 1×',
-			x: 0.65,
-			z: 3.25,
+			x: 1.1,
+			z: 5.4,
 			value: 1,
 			color: '#e5c64f',
 			movable: false
@@ -149,8 +149,8 @@ export class ColonySimulation {
 		{
 			id: 'orchard',
 			label: 'RICH FRUIT · 3×',
-			x: 5.2,
-			z: -2.1,
+			x: 9.4,
+			z: -4.1,
 			value: 3,
 			color: '#c96043',
 			movable: true
@@ -176,7 +176,7 @@ export class ColonySimulation {
 	constructor(seed = 'pinonite-ant-colony', settings?: Partial<ColonySettings>) {
 		this.random = mulberry32(hashSeed(seed));
 		this.settings = {
-			population: settings?.population ?? 52,
+			population: settings?.population ?? 72,
 			persistence: settings?.persistence ?? 68,
 			diffusion: settings?.diffusion ?? 46,
 			speed: settings?.speed ?? 1,
@@ -219,7 +219,7 @@ export class ColonySimulation {
 	}
 
 	resizePopulation(population: number): void {
-		this.settings.population = Math.max(8, Math.min(120, Math.round(population)));
+		this.settings.population = Math.max(8, Math.min(160, Math.round(population)));
 		while (this.ants.length < this.settings.population) this.ants.push(this.createAnt());
 		if (this.ants.length > this.settings.population) this.ants.length = this.settings.population;
 	}

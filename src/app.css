@@ -203,18 +203,25 @@ canvas.hidden {
 .vision-filters button span {
 	width: 8px;
 	height: 8px;
-	border-radius: 50%;
 }
 .home-dot {
+	border-radius: 50%;
 	background: #2ba9eb;
 }
 .food-dot {
 	margin-left: 0.55rem;
-	background: #ff6848;
+	border: 2px solid #ff6848;
+	border-radius: 50%;
+	background: transparent;
 }
 .warning-dot {
 	margin-left: 0.55rem;
-	background: #d34b83;
+	border: 2px solid #d34b83;
+	background: transparent;
+	transform: rotate(45deg) scale(0.82);
+}
+.vision-filters button span {
+	border-radius: 50%;
 }
 .vision-filters {
 	gap: 0.3rem;
