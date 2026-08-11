@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { AntAgent, ColonySimulation, FoodSource, Obstacle } from './simulation';
+import { SENSOR_OFFSETS, type AntAgent, type ColonySimulation, type FoodSource, type Obstacle } from './simulation';
 
 export type ColonyView = 'habitat' | 'signals' | 'map';
 export type ResourcePreset = 'conserve' | 'balanced' | 'full';
@@ -12,6 +12,8 @@ const appendageDirection = new THREE.Vector3();
 const grassColor = new THREE.Color('#91ad6a');
 const homeSignalColor = new THREE.Color('#1787c7');
 const foodSignalColor = new THREE.Color('#e55232');
+const warningSignalColor = new THREE.Color('#913f68');
+const neutralSignalColor = new THREE.Color('#8f9588');
 
 function labelSprite(text: string, accent: string, scale = 1): THREE.Sprite {
 	const canvas = document.createElement('canvas');
@@ -152,6 +154,12 @@ export class ColonyScene {
 	private pheromones: THREE.Points;
 	private pheromonePositions: Float32Array;
 	private pheromoneColors: Float32Array;
+	private visionCone: THREE.Mesh;
+	private visionRays: THREE.LineSegments;
+	private visionRayPositions = new Float32Array(SENSOR_OFFSETS.length * 6);
+	private visionRayColors = new Float32Array(SENSOR_OFFSETS.length * 6);
+	private visionRing: THREE.Mesh;
+	private visionVisible = true;
 	private foodGroups = new Map<string, THREE.Group>();
 	private foodLabels = new Map<string, THREE.Sprite>();
 	private obstacleGroups = new Map<string, THREE.Group>();
@@ -275,7 +283,7 @@ export class ColonyScene {
 		this.cargoMesh.frustumCulled = false;
 		this.scene.add(this.cargoMesh);
 
-		const maximumPoints = simulation.columns * simulation.rows * 2;
+		const maximumPoints = simulation.columns * simulation.rows * 3;
 		this.pheromonePositions = new Float32Array(maximumPoints * 3);
 		this.pheromoneColors = new Float32Array(maximumPoints * 3);
 		const pheromoneGeometry = new THREE.BufferGeometry();
@@ -298,6 +306,58 @@ export class ColonyScene {
 		this.pheromones.frustumCulled = false;
 		this.pheromones.renderOrder = 2;
 		this.scene.add(this.pheromones);
+
+		const coneGeometry = new THREE.BufferGeometry();
+		coneGeometry.setAttribute(
+			'position',
+			new THREE.Float32BufferAttribute(
+				[
+					0,
+					0,
+					0,
+					Math.cos(SENSOR_OFFSETS[0]),
+					0,
+					Math.sin(SENSOR_OFFSETS[0]),
+					Math.cos(SENSOR_OFFSETS[SENSOR_OFFSETS.length - 1]),
+					0,
+					Math.sin(SENSOR_OFFSETS[SENSOR_OFFSETS.length - 1])
+				],
+				3
+			)
+		);
+		this.visionCone = new THREE.Mesh(
+			coneGeometry,
+			new THREE.MeshBasicMaterial({
+				color: foodSignalColor,
+				transparent: true,
+				opacity: 0.11,
+				depthWrite: false,
+				side: THREE.DoubleSide
+			})
+		);
+		this.visionCone.frustumCulled = false;
+		this.visionCone.renderOrder = 3;
+		this.scene.add(this.visionCone);
+
+		const visionRayGeometry = new THREE.BufferGeometry();
+		visionRayGeometry.setAttribute('position', new THREE.BufferAttribute(this.visionRayPositions, 3));
+		visionRayGeometry.setAttribute('color', new THREE.BufferAttribute(this.visionRayColors, 3));
+		this.visionRays = new THREE.LineSegments(
+			visionRayGeometry,
+			new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.94, depthTest: false })
+		);
+		this.visionRays.frustumCulled = false;
+		this.visionRays.renderOrder = 5;
+		this.scene.add(this.visionRays);
+
+		this.visionRing = new THREE.Mesh(
+			new THREE.RingGeometry(0.22, 0.28, 24),
+			new THREE.MeshBasicMaterial({ color: '#d8ed57', transparent: true, opacity: 0.92, side: THREE.DoubleSide })
+		);
+		this.visionRing.rotation.x = -Math.PI / 2;
+		this.visionRing.frustumCulled = false;
+		this.visionRing.renderOrder = 5;
+		this.scene.add(this.visionRing);
 
 		this.nestLabel.position.set(simulation.nest.x, 1.55, simulation.nest.z);
 		this.scene.add(this.nestLabel);
@@ -333,6 +393,13 @@ export class ColonyScene {
 		this.pheromones.visible = visible;
 	}
 
+	setVisionVisible(visible: boolean): void {
+		this.visionVisible = visible;
+		this.visionCone.visible = visible;
+		this.visionRays.visible = visible;
+		this.visionRing.visible = visible;
+	}
+
 	resize(width: number, height: number): void {
 		if (!width || !height) return;
 		this.renderer.setSize(width, height, false);
@@ -365,6 +432,7 @@ export class ColonyScene {
 		this.syncFoodVisuals();
 		this.syncObstacleVisuals();
 		this.updateAntInstances();
+		this.updateVision();
 		if (this.frameCount % (this.preset === 'conserve' ? 5 : 3) === 0) this.updatePheromones();
 		this.renderer.render(this.scene, this.camera);
 	}
@@ -524,15 +592,57 @@ export class ColonyScene {
 		return { offset: 0.25, y: 0.86 };
 	}
 
+	private updateVision(): void {
+		if (!this.visionVisible) return;
+		const ant = this.simulation.inspectableAnt;
+		if (!ant) return;
+		const sensorDistance =
+			this.simulation.settings.temperament === 'curious'
+				? 0.68
+				: this.simulation.settings.temperament === 'disciplined'
+					? 0.86
+					: 0.78;
+		this.visionCone.position.set(ant.x, 0.735, ant.z);
+		this.visionCone.rotation.set(0, -ant.angle, 0);
+		this.visionCone.scale.setScalar(sensorDistance);
+		(this.visionCone.material as THREE.MeshBasicMaterial).color.copy(
+			ant.sensorKind === 'home' ? homeSignalColor : foodSignalColor
+		);
+		this.visionRing.position.set(ant.x, 0.746, ant.z);
+
+		for (let index = 0; index < SENSOR_OFFSETS.length; index += 1) {
+			const direction = ant.angle + SENSOR_OFFSETS[index];
+			const offset = index * 6;
+			this.visionRayPositions[offset] = ant.x;
+			this.visionRayPositions[offset + 1] = 0.765;
+			this.visionRayPositions[offset + 2] = ant.z;
+			this.visionRayPositions[offset + 3] = ant.x + Math.cos(direction) * sensorDistance;
+			this.visionRayPositions[offset + 4] = 0.765;
+			this.visionRayPositions[offset + 5] = ant.z + Math.sin(direction) * sensorDistance;
+			const warning = ant.sensorWarnings[index];
+			const signal = ant.sensorReadings[index];
+			const base = warning > signal * 0.7 ? warningSignalColor : ant.sensorKind === 'home' ? homeSignalColor : foodSignalColor;
+			scratchColor.copy(base).lerp(neutralSignalColor, Math.max(0, 0.72 - Math.max(signal, warning) * 1.5));
+			for (const vertexOffset of [offset, offset + 3]) {
+				this.visionRayColors[vertexOffset] = scratchColor.r;
+				this.visionRayColors[vertexOffset + 1] = scratchColor.g;
+				this.visionRayColors[vertexOffset + 2] = scratchColor.b;
+			}
+		}
+		(this.visionRays.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+		(this.visionRays.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+	}
+
 	private updatePheromones(): void {
 		let point = 0;
-		const { columns, rows, width, depth, homeTrail, foodTrail } = this.simulation;
+		const { columns, rows, width, depth, homeTrail, foodTrail, warningTrail } = this.simulation;
 		for (let row = 0; row < rows; row += 1) {
 			for (let column = 0; column < columns; column += 1) {
 				const index = row * columns + column;
 				for (const [value, color] of [
 					[homeTrail[index], homeSignalColor],
-					[foodTrail[index], foodSignalColor]
+					[foodTrail[index], foodSignalColor],
+					[warningTrail[index], warningSignalColor]
 				] as const) {
 					if (value < 0.008) continue;
 					const offset = point * 3;

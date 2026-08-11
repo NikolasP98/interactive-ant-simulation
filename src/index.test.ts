@@ -86,4 +86,54 @@ describe('colony simulation', () => {
 		);
 		expect(furthest).toBeGreaterThan(3.5);
 	});
+
+	it('prioritizes food evidence while searching and home evidence while carrying', () => {
+		const colony = new ColonySimulation('priority-test', { population: 8 });
+		colony.foodTrail.fill(0.72);
+		colony.homeTrail.fill(0.84);
+		const ant = colony.ants[0];
+		ant.x = 0;
+		ant.z = 0;
+		colony.update(1 / 60);
+		expect(ant.sensorKind).toBe('food');
+
+		ant.hasFood = true;
+		ant.action = 'carry';
+		ant.carryingFoodId = colony.food.id;
+		ant.carryingValue = colony.food.value;
+		colony.update(1 / 60);
+		expect(ant.sensorKind).toBe('home');
+	});
+
+	it('reflects and recovers before an ant can pace along the field edge', () => {
+		const colony = new ColonySimulation('edge-test', { population: 8 });
+		const ant = colony.ants[0];
+		ant.x = colony.width / 2 - 0.5;
+		ant.z = 0;
+		ant.angle = 0;
+		for (let frame = 0; frame < 240; frame += 1) colony.update(1 / 60);
+
+		expect(ant.x).toBeLessThan(colony.width / 2 - 1.1);
+		expect(Math.max(...colony.warningTrail)).toBeGreaterThan(0);
+	});
+
+	it('marks an unrewarding signal and exits it instead of following forever', () => {
+		const colony = new ColonySimulation('false-signal-test', {
+			population: 8,
+			temperament: 'disciplined'
+		});
+		colony.foods[0].x = -8;
+		colony.foods[0].z = -5;
+		colony.food.x = 8;
+		colony.food.z = 5;
+		colony.foodTrail.fill(0.64);
+		let peakWarning = 0;
+		for (let frame = 0; frame < 900; frame += 1) {
+			colony.update(1 / 60);
+			peakWarning = Math.max(peakWarning, ...colony.warningTrail);
+		}
+
+		expect(peakWarning).toBeGreaterThan(0.08);
+		expect(colony.ants.some((ant) => ant.signalFollowClock < 1)).toBe(true);
+	});
 });

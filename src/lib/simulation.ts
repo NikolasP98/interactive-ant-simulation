@@ -1,5 +1,7 @@
 export type Temperament = 'curious' | 'adaptive' | 'disciplined';
 export type AntAction = 'forage' | 'pickup' | 'carry' | 'unload';
+export type AntDecision = 'search' | 'signal' | 'goal' | 'recover' | 'edge';
+export const SENSOR_OFFSETS = [-0.72, -0.32, 0, 0.32, 0.72] as const;
 
 export type ColonySettings = {
 	population: number;
@@ -41,6 +43,19 @@ export type AntAgent = {
 	actionClock: number;
 	actionDuration: number;
 	actionProgress: number;
+	decision: AntDecision;
+	sensorKind: 'food' | 'home';
+	sensorReadings: number[];
+	sensorWarnings: number[];
+	sensorScores: number[];
+	signalConfidence: number;
+	signalPeak: number;
+	signalFollowClock: number;
+	declineClock: number;
+	recoveryClock: number;
+	memoryClock: number;
+	recentPositions: Array<{ x: number; z: number }>;
+	loopHits: number;
 };
 
 type TemperamentProfile = {
@@ -50,6 +65,8 @@ type TemperamentProfile = {
 	stride: number;
 	sensorDistance: number;
 	threshold: number;
+	patience: number;
+	warningWeight: number;
 };
 
 const TAU = Math.PI * 2;
@@ -60,7 +77,9 @@ const TEMPERAMENTS: Record<Temperament, TemperamentProfile> = {
 		turnRate: 3.1,
 		stride: 1.16,
 		sensorDistance: 0.68,
-		threshold: 0.052
+		threshold: 0.052,
+		patience: 1.05,
+		warningWeight: 0.88
 	},
 	adaptive: {
 		wander: 1,
@@ -68,7 +87,9 @@ const TEMPERAMENTS: Record<Temperament, TemperamentProfile> = {
 		turnRate: 2.75,
 		stride: 1.08,
 		sensorDistance: 0.78,
-		threshold: 0.035
+		threshold: 0.035,
+		patience: 1.35,
+		warningWeight: 1.05
 	},
 	disciplined: {
 		wander: 0.54,
@@ -76,7 +97,9 @@ const TEMPERAMENTS: Record<Temperament, TemperamentProfile> = {
 		turnRate: 2.35,
 		stride: 1,
 		sensorDistance: 0.86,
-		threshold: 0.022
+		threshold: 0.022,
+		patience: 1.75,
+		warningWeight: 1.2
 	}
 };
 
@@ -134,6 +157,7 @@ export class ColonySimulation {
 	ants: AntAgent[] = [];
 	homeTrail = new Float32Array(this.columns * this.rows);
 	foodTrail = new Float32Array(this.columns * this.rows);
+	warningTrail = new Float32Array(this.columns * this.rows);
 	deliveries = 0;
 	harvestValue = 0;
 	elapsed = 0;
@@ -142,7 +166,10 @@ export class ColonySimulation {
 	private fieldClock = 0;
 	private nextHomeTrail = new Float32Array(this.columns * this.rows);
 	private nextFoodTrail = new Float32Array(this.columns * this.rows);
+	private nextWarningTrail = new Float32Array(this.columns * this.rows);
 	private obstacleSerial = 0;
+	private focusClock = 0;
+	private focusIndex = 0;
 
 	constructor(seed = 'pinonite-ant-colony', settings?: Partial<ColonySettings>) {
 		this.random = mulberry32(hashSeed(seed));
@@ -161,17 +188,25 @@ export class ColonySimulation {
 		return this.foods.find((food) => food.movable) ?? this.foods[0];
 	}
 
+	get inspectableAnt(): AntAgent | null {
+		return this.ants[this.focusIndex] ?? this.ants[0] ?? null;
+	}
+
 	reset(): void {
 		this.ants = [];
 		this.homeTrail.fill(0);
 		this.foodTrail.fill(0);
 		this.nextHomeTrail.fill(0);
 		this.nextFoodTrail.fill(0);
+		this.warningTrail.fill(0);
+		this.nextWarningTrail.fill(0);
 		this.obstacles.length = 0;
 		this.deliveries = 0;
 		this.harvestValue = 0;
 		this.elapsed = 0;
 		this.fieldClock = 0;
+		this.focusClock = 0;
+		this.focusIndex = 0;
 		this.seedNest();
 		this.resizePopulation(this.settings.population);
 	}
@@ -228,11 +263,15 @@ export class ColonySimulation {
 		};
 		this.obstacles.push(obstacle);
 		this.eraseTrailAtObstacle(obstacle);
+		this.markObstacleAsUnreliable(obstacle);
 		return obstacle;
 	}
 
 	clearObstacles(): void {
 		this.obstacles.length = 0;
+		for (let index = 0; index < this.warningTrail.length; index += 1) {
+			this.warningTrail[index] *= 0.22;
+		}
 	}
 
 	update(deltaSeconds: number): void {
@@ -246,13 +285,43 @@ export class ColonySimulation {
 			const diffusion = 0.018 + (this.settings.diffusion / 100) * 0.16;
 			this.diffuseField(this.homeTrail, this.nextHomeTrail, diffusion, decay);
 			this.diffuseField(this.foodTrail, this.nextFoodTrail, diffusion, decay);
+			this.diffuseField(
+				this.warningTrail,
+				this.nextWarningTrail,
+				0.035 + diffusion * 0.28,
+				Math.pow(0.995, this.fieldClock * 60),
+				false
+			);
 			[this.homeTrail, this.nextHomeTrail] = [this.nextHomeTrail, this.homeTrail];
 			[this.foodTrail, this.nextFoodTrail] = [this.nextFoodTrail, this.foodTrail];
+			[this.warningTrail, this.nextWarningTrail] = [this.nextWarningTrail, this.warningTrail];
 			this.seedNest();
 			this.fieldClock = 0;
 		}
 
 		for (const ant of this.ants) this.updateAnt(ant, dt);
+		this.updateInspectableAnt(dt);
+	}
+
+	private updateInspectableAnt(dt: number): void {
+		this.focusClock -= dt;
+		if (this.focusClock > 0 || this.ants.length === 0) return;
+		this.focusClock = 1.4;
+		let bestIndex = 0;
+		let bestScore = -Infinity;
+		for (let index = 0; index < this.ants.length; index += 1) {
+			const ant = this.ants[index];
+			const distance = Math.hypot(ant.x - this.nest.x, ant.z - this.nest.z);
+			const score =
+				ant.signalConfidence * 5 +
+				Math.min(4, distance) * 0.08 +
+				(ant.decision === 'recover' || ant.decision === 'edge' ? 0.28 : 0);
+			if (score > bestScore) {
+				bestScore = score;
+				bestIndex = index;
+			}
+		}
+		this.focusIndex = bestIndex;
 	}
 
 	private createAnt(): AntAgent {
@@ -271,7 +340,20 @@ export class ColonySimulation {
 			action: 'forage',
 			actionClock: 0,
 			actionDuration: 0,
-			actionProgress: 0
+			actionProgress: 0,
+			decision: 'search',
+			sensorKind: 'food',
+			sensorReadings: SENSOR_OFFSETS.map(() => 0),
+			sensorWarnings: SENSOR_OFFSETS.map(() => 0),
+			sensorScores: SENSOR_OFFSETS.map(() => 0),
+			signalConfidence: 0,
+			signalPeak: 0,
+			signalFollowClock: 0,
+			declineClock: 0,
+			recoveryClock: 0,
+			memoryClock: this.random() * 0.4,
+			recentPositions: [],
+			loopHits: 0
 		};
 	}
 
@@ -289,43 +371,57 @@ export class ColonySimulation {
 		const goal = ant.hasFood ? this.nest : visibleFood;
 		const distanceToGoal = goal ? Math.hypot(goal.x - ant.x, goal.z - ant.z) : Infinity;
 		const directPerception = ant.hasFood ? 2.1 : 1.35 + (visibleFood?.value ?? 0) * 0.1;
+		const sensed = this.senseTrail(ant, profile);
+		const loopDetected = this.updateSpatialMemory(ant, dt);
 		let desired = ant.angle;
 
-		if (goal && distanceToGoal < directPerception) {
+		if (ant.recoveryClock > 0) {
+			ant.recoveryClock = Math.max(0, ant.recoveryClock - dt);
+			ant.decision = 'recover';
+			ant.signalConfidence = 0;
+			desired +=
+				(Math.sin(this.elapsed * 1.4 + ant.wanderSeed) * 0.46 + (this.random() - 0.5) * 0.22) *
+				dt;
+		} else if (goal && distanceToGoal < directPerception) {
 			desired = Math.atan2(goal.z - ant.z, goal.x - ant.x);
-		} else {
-			const field = ant.hasFood ? this.homeTrail : this.foodTrail;
-			const candidates = [-0.72, -0.32, 0, 0.32, 0.72].map((offset) => {
-				const direction = ant.angle + offset;
-				const sample = this.sampleField(
-					field,
-					ant.x + Math.cos(direction) * profile.sensorDistance,
-					ant.z + Math.sin(direction) * profile.sensorDistance
-				);
-				const forwardBias = 1 - Math.abs(offset) * 0.11;
-				return {
-					direction,
-					score: sample * forwardBias * profile.signalWeight + this.random() * 0.018 * profile.wander
-				};
-			});
-			candidates.sort((a, b) => b.score - a.score);
-			if (candidates[0].score > profile.threshold) {
-				desired = candidates[0].direction;
+			ant.decision = 'goal';
+			ant.signalConfidence = 1;
+			this.resetSignalCommitment(ant);
+		} else if (sensed.bestScore > profile.threshold && sensed.bestSignal > profile.threshold * 0.72) {
+			ant.signalFollowClock += dt;
+			ant.signalPeak = Math.max(ant.signalPeak * Math.pow(0.9975, dt * 60), sensed.bestSignal);
+			if (sensed.bestSignal < Math.max(0.016, ant.signalPeak * 0.42)) ant.declineClock += dt;
+			else ant.declineClock = Math.max(0, ant.declineClock - dt * 1.6);
+
+			const timedOut = ant.signalFollowClock > 9 + profile.patience * 2.2;
+			if (ant.declineClock > profile.patience || timedOut || loopDetected) {
+				this.enterRecovery(ant, loopDetected ? 0.58 : 0.72);
+				desired = ant.angle;
 			} else {
-				// Wander is an angular velocity, not a per-frame heading jump. Keeping the
-				// perturbation time-scaled prevents new foragers from orbiting the nest.
-				desired +=
-					(Math.sin(this.elapsed * 0.92 + ant.wanderSeed) * 0.72 +
-						(this.random() - 0.5) * 0.9) *
-					profile.wander *
-					dt;
+				desired = sensed.direction;
+				ant.decision = 'signal';
 			}
+		} else {
+			ant.decision = 'search';
+			ant.signalConfidence *= Math.pow(0.9, dt * 60);
+			ant.signalFollowClock = Math.max(0, ant.signalFollowClock - dt * 2);
+			ant.signalPeak *= Math.pow(0.985, dt * 60);
+			ant.declineClock = Math.max(0, ant.declineClock - dt * 2);
+			// Wander is an angular velocity, not a per-frame heading jump. Keeping the
+			// perturbation time-scaled prevents new foragers from orbiting the nest.
+			desired +=
+				(Math.sin(this.elapsed * 0.92 + ant.wanderSeed) * 0.72 +
+					(this.random() - 0.5) * 0.9) *
+				profile.wander *
+				dt;
 		}
 
 		desired = this.avoidObstacles(ant, desired);
 		const edgeX = this.width / 2 - 0.48;
 		const edgeZ = this.depth / 2 - 0.48;
-		if (Math.abs(ant.x) > edgeX || Math.abs(ant.z) > edgeZ) desired = Math.atan2(-ant.z, -ant.x);
+		const edgeSteering = this.steerAwayFromEdges(ant, desired, edgeX, edgeZ);
+		desired = edgeSteering.direction;
+		if (edgeSteering.pressure > 0.34 && ant.decision !== 'recover') ant.decision = 'edge';
 		ant.angle += Math.max(
 			-profile.turnRate * dt,
 			Math.min(profile.turnRate * dt, shortestAngle(ant.angle, desired))
@@ -334,6 +430,7 @@ export class ColonySimulation {
 		const stride = profile.stride * dt;
 		let nextX = ant.x + Math.cos(ant.angle) * stride;
 		let nextZ = ant.z + Math.sin(ant.angle) * stride;
+		let contact = false;
 		for (const obstacle of this.obstacles) {
 			const distance = Math.hypot(nextX - obstacle.x, nextZ - obstacle.z);
 			const clearance = obstacle.radius + 0.18;
@@ -342,10 +439,27 @@ export class ColonySimulation {
 				nextX = obstacle.x + Math.cos(away) * clearance;
 				nextZ = obstacle.z + Math.sin(away) * clearance;
 				ant.angle = away + (ant.wanderSeed % 2 > 1 ? Math.PI / 2 : -Math.PI / 2);
+				contact = true;
 			}
 		}
-		ant.x = Math.max(-edgeX, Math.min(edgeX, nextX));
-		ant.z = Math.max(-edgeZ, Math.min(edgeZ, nextZ));
+		if (nextX > edgeX || nextX < -edgeX) {
+			nextX = Math.max(-edgeX + 0.025, Math.min(edgeX - 0.025, nextX));
+			ant.angle = Math.PI - ant.angle + (this.random() - 0.5) * 0.36;
+			contact = true;
+		}
+		if (nextZ > edgeZ || nextZ < -edgeZ) {
+			nextZ = Math.max(-edgeZ + 0.025, Math.min(edgeZ - 0.025, nextZ));
+			ant.angle = -ant.angle + (this.random() - 0.5) * 0.36;
+			contact = true;
+		}
+		ant.x = nextX;
+		ant.z = nextZ;
+		if (contact) {
+			this.deposit(this.warningTrail, ant.x, ant.z, 0.48);
+			ant.recoveryClock = Math.max(ant.recoveryClock, 0.72);
+			ant.decision = 'edge';
+			this.resetSignalCommitment(ant);
+		}
 
 		ant.trailClock -= dt;
 		if (ant.trailClock <= 0) {
@@ -356,6 +470,114 @@ export class ColonySimulation {
 
 		if (!ant.hasFood && visibleFood && distanceToGoal < 0.42) this.startPickup(ant, visibleFood);
 		if (ant.hasFood && ant.action === 'carry' && distanceToGoal < 0.56) this.startUnload(ant);
+	}
+
+	private senseTrail(
+		ant: AntAgent,
+		profile: TemperamentProfile
+	): { direction: number; bestSignal: number; bestScore: number } {
+		const field = ant.hasFood ? this.homeTrail : this.foodTrail;
+		ant.sensorKind = ant.hasFood ? 'home' : 'food';
+		let bestIndex = 2;
+		let bestScore = -Infinity;
+		let secondScore = -Infinity;
+		let bestSignal = 0;
+
+		for (let index = 0; index < SENSOR_OFFSETS.length; index += 1) {
+			const offset = SENSOR_OFFSETS[index];
+			const direction = ant.angle + offset;
+			const sampleX = ant.x + Math.cos(direction) * profile.sensorDistance;
+			const sampleZ = ant.z + Math.sin(direction) * profile.sensorDistance;
+			const signal = this.sampleField(field, sampleX, sampleZ);
+			const warning = this.sampleField(this.warningTrail, sampleX, sampleZ);
+			const edgeRisk = this.edgeRisk(sampleX, sampleZ);
+			const forwardBias = 1 - Math.abs(offset) * 0.11;
+			const score =
+				signal * forwardBias * profile.signalWeight -
+				warning * profile.warningWeight -
+				edgeRisk * 0.42 +
+				this.random() * 0.014 * profile.wander;
+			ant.sensorReadings[index] = signal;
+			ant.sensorWarnings[index] = warning;
+			ant.sensorScores[index] = score;
+			if (score > bestScore) {
+				secondScore = bestScore;
+				bestScore = score;
+				bestSignal = signal;
+				bestIndex = index;
+			} else if (score > secondScore) secondScore = score;
+		}
+
+		ant.signalConfidence = Math.max(
+			0,
+			Math.min(1, bestSignal * 0.7 + Math.max(0, bestScore - secondScore) * 3.2)
+		);
+		return {
+			direction: ant.angle + SENSOR_OFFSETS[bestIndex],
+			bestSignal,
+			bestScore
+		};
+	}
+
+	private updateSpatialMemory(ant: AntAgent, dt: number): boolean {
+		ant.memoryClock -= dt;
+		if (ant.memoryClock > 0) return false;
+		ant.memoryClock = 0.42 + this.random() * 0.08;
+		const olderPositions = ant.recentPositions.slice(0, -3);
+		const repeated = olderPositions.some((point) => Math.hypot(point.x - ant.x, point.z - ant.z) < 0.62);
+		ant.loopHits = repeated ? ant.loopHits + 1 : Math.max(0, ant.loopHits - 1);
+		ant.recentPositions.push({ x: ant.x, z: ant.z });
+		if (ant.recentPositions.length > 10) ant.recentPositions.shift();
+		return ant.loopHits >= 2;
+	}
+
+	private enterRecovery(ant: AntAgent, turn: number): void {
+		this.deposit(this.warningTrail, ant.x, ant.z, 0.55);
+		ant.angle += (this.random() < 0.5 ? -1 : 1) * Math.PI * turn;
+		ant.recoveryClock = 1.15 + this.random() * 0.8;
+		ant.decision = 'recover';
+		this.resetSignalCommitment(ant);
+		ant.recentPositions.length = 0;
+		ant.loopHits = 0;
+	}
+
+	private resetSignalCommitment(ant: AntAgent): void {
+		ant.signalPeak = 0;
+		ant.signalFollowClock = 0;
+		ant.declineClock = 0;
+	}
+
+	private steerAwayFromEdges(
+		ant: AntAgent,
+		desired: number,
+		edgeX: number,
+		edgeZ: number
+	): { direction: number; pressure: number } {
+		const margin = 1.35;
+		let inwardX = 0;
+		let inwardZ = 0;
+		if (ant.x > edgeX - margin) inwardX -= (ant.x - (edgeX - margin)) / margin;
+		if (ant.x < -edgeX + margin) inwardX += (-edgeX + margin - ant.x) / margin;
+		if (ant.z > edgeZ - margin) inwardZ -= (ant.z - (edgeZ - margin)) / margin;
+		if (ant.z < -edgeZ + margin) inwardZ += (-edgeZ + margin - ant.z) / margin;
+		const pressure = Math.min(1, Math.hypot(inwardX, inwardZ));
+		if (pressure <= 0) return { direction: desired, pressure: 0 };
+		const inward = Math.atan2(inwardZ, inwardX);
+		return {
+			direction: desired + shortestAngle(desired, inward) * Math.min(0.92, 0.22 + pressure * 0.82),
+			pressure
+		};
+	}
+
+	private edgeRisk(x: number, z: number): number {
+		const edgeX = this.width / 2 - 0.48;
+		const edgeZ = this.depth / 2 - 0.48;
+		const margin = 1.15;
+		return Math.max(
+			0,
+			Math.min(1, (Math.abs(x) - (edgeX - margin)) / margin),
+			Math.min(1, (Math.abs(z) - (edgeZ - margin)) / margin)
+		);
 	}
 
 	private findVisibleFood(ant: AntAgent): FoodSource | null {
@@ -425,13 +647,21 @@ export class ColonySimulation {
 		field: Float32Array,
 		target: Float32Array,
 		diffusion: number,
-		decay: number
+		decay: number,
+		maskObstacles = true
 	): void {
 		for (let row = 0; row < this.rows; row += 1) {
 			for (let column = 0; column < this.columns; column += 1) {
 				const index = row * this.columns + column;
-				const point = this.pointForIndex(index);
-				if (this.obstacles.some((obstacle) => Math.hypot(point.x - obstacle.x, point.z - obstacle.z) < obstacle.radius)) {
+				if (
+					maskObstacles &&
+					this.obstacles.length > 0 &&
+					this.obstacles.some((obstacle) => {
+						const x = -this.width / 2 + ((column + 0.5) / this.columns) * this.width;
+						const z = -this.depth / 2 + ((row + 0.5) / this.rows) * this.depth;
+						return Math.hypot(x - obstacle.x, z - obstacle.z) < obstacle.radius;
+					})
+				) {
 					target[index] = 0;
 					continue;
 				}
@@ -482,6 +712,18 @@ export class ColonySimulation {
 			if (Math.hypot(point.x - obstacle.x, point.z - obstacle.z) > obstacle.radius * 1.1) continue;
 			this.homeTrail[index] = 0;
 			this.foodTrail[index] = 0;
+		}
+	}
+
+	private markObstacleAsUnreliable(obstacle: Obstacle): void {
+		for (let index = 0; index < this.warningTrail.length; index += 1) {
+			const point = this.pointForIndex(index);
+			const distance = Math.hypot(point.x - obstacle.x, point.z - obstacle.z);
+			if (distance > obstacle.radius * 1.45) continue;
+			this.warningTrail[index] = Math.max(
+				this.warningTrail[index],
+				0.9 * (1 - distance / (obstacle.radius * 1.6))
+			);
 		}
 	}
 

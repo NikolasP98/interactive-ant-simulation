@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ColonyScene, type ColonyView, type ResourcePreset } from '$lib/colonyScene';
-	import { ColonySimulation, type Temperament } from '$lib/simulation';
+	import { ColonySimulation, SENSOR_OFFSETS, type AntDecision, type Temperament } from '$lib/simulation';
 	import '../app.css';
 
 	const availableViews: ColonyView[] = ['habitat', 'signals', 'map'];
@@ -15,6 +15,7 @@
 	let active = $state(true);
 	let playing = $state(true);
 	let showSignals = $state(true);
+	let showVision = $state(true);
 	let population = $state(52);
 	let persistence = $state(68);
 	let diffusion = $state(46);
@@ -24,6 +25,8 @@
 	let harvest = $state(0);
 	let carrying = $state(0);
 	let obstacleCount = $state(0);
+	let focusDecision = $state<AntDecision>('search');
+	let focusConfidence = $state(0);
 	let pointerStart = { x: 0, y: 0 };
 	let simulation: ColonySimulation | null = null;
 	let colonyScene: ColonyScene | null = null;
@@ -52,6 +55,7 @@
 				simSpeed,
 				temperament,
 				showSignals,
+				showVision,
 				food: simulation.food
 			})
 		);
@@ -127,20 +131,59 @@
 					const index = row * simulation.columns + column;
 					const home = simulation.homeTrail[index];
 					const food = simulation.foodTrail[index];
-					if (home < 0.018 && food < 0.018) continue;
+					const warning = simulation.warningTrail[index];
+					if (home < 0.008 && food < 0.008 && warning < 0.008) continue;
 					const point = toScreen(
 						-simulation.width / 2 + ((column + 0.5) / simulation.columns) * simulation.width,
 						-simulation.depth / 2 + ((row + 0.5) / simulation.rows) * simulation.depth
 					);
-					const value = Math.max(home, food);
+					const value = Math.max(home, food, warning);
 					context.globalAlpha = 0.22 + value * 0.7;
-					context.fillStyle = food > home ? '#df6747' : '#4e91bd';
+					context.fillStyle = warning > Math.max(home, food) ? '#913f68' : food > home ? '#df6747' : '#4e91bd';
 					context.beginPath();
 					context.arc(point.x, point.y, 1.25 + value * 2, 0, Math.PI * 2);
 					context.fill();
 				}
 			}
 			context.globalAlpha = 1;
+		}
+
+		if (showVision) {
+			const ant = simulation.inspectableAnt;
+			if (ant) {
+				const origin = toScreen(ant.x, ant.z);
+				const sensorDistance = temperament === 'curious' ? 0.68 : temperament === 'disciplined' ? 0.86 : 0.78;
+				const endpoints = SENSOR_OFFSETS.map((offset) =>
+					toScreen(
+						ant.x + Math.cos(ant.angle + offset) * sensorDistance,
+						ant.z + Math.sin(ant.angle + offset) * sensorDistance
+					)
+				);
+				context.save();
+				context.fillStyle = ant.sensorKind === 'home' ? 'rgba(23,135,199,.12)' : 'rgba(229,82,50,.12)';
+				context.beginPath();
+				context.moveTo(origin.x, origin.y);
+				context.lineTo(endpoints[0].x, endpoints[0].y);
+				context.lineTo(endpoints[endpoints.length - 1].x, endpoints[endpoints.length - 1].y);
+				context.closePath();
+				context.fill();
+				for (let index = 0; index < endpoints.length; index += 1) {
+					const warningWins = ant.sensorWarnings[index] > ant.sensorReadings[index] * 0.7;
+					context.strokeStyle = warningWins ? '#913f68' : ant.sensorKind === 'home' ? '#1787c7' : '#e55232';
+					context.globalAlpha = 0.35 + Math.max(ant.sensorReadings[index], ant.sensorWarnings[index]) * 0.65;
+					context.beginPath();
+					context.moveTo(origin.x, origin.y);
+					context.lineTo(endpoints[index].x, endpoints[index].y);
+					context.stroke();
+				}
+				context.globalAlpha = 1;
+				context.strokeStyle = '#b7d928';
+				context.lineWidth = 2;
+				context.beginPath();
+				context.arc(origin.x, origin.y, 8, 0, Math.PI * 2);
+				context.stroke();
+				context.restore();
+			}
 		}
 
 		for (const obstacle of simulation.obstacles) {
@@ -267,6 +310,7 @@
 					? settings.temperament
 					: temperament;
 				showSignals = settings.showSignals ?? showSignals;
+				showVision = settings.showVision ?? showVision;
 			} catch {
 				// Ignore older or incomplete settings snapshots.
 			}
@@ -316,6 +360,7 @@
 					if (context) drawMap(context, rect.width, rect.height);
 				} else {
 					colonyScene?.setSignalsVisible(view === 'signals' || showSignals);
+					colonyScene?.setVisionVisible(showVision);
 					colonyScene?.render();
 				}
 			}
@@ -325,6 +370,8 @@
 				harvest = simulation.harvestValue;
 				carrying = simulation.ants.filter((ant) => ant.hasFood).length;
 				obstacleCount = simulation.obstacles.length;
+				focusDecision = simulation.inspectableAnt?.decision ?? 'search';
+				focusConfidence = simulation.inspectableAnt?.signalConfidence ?? 0;
 				readoutClock = 0;
 			}
 			raf = requestAnimationFrame(frame);
@@ -398,7 +445,7 @@
 						? 'The ground keeps the colony’s memory'
 						: 'The original idea, kept in view'}
 			</strong>
-			<small>{temperament.toUpperCase()} TEMPERAMENT · {obstacleCount} BLOCKS</small>
+			<small>{temperament.toUpperCase()} · {obstacleCount} BLOCKS · SCOUT {focusDecision.toUpperCase()} {Math.round(focusConfidence * 100)}%</small>
 		</div>
 		<div class="readout" aria-live="polite">
 			<span><b>{String(delivered).padStart(2, '0')}</b> DELIVERIES</span>
@@ -408,8 +455,13 @@
 		<div class="instruction">
 			{view === 'map' ? 'CLICK FIELD TO MOVE RICH FOOD' : 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
 		</div>
-		{#if view === 'signals'}
-			<div class="signal-key"><span class="home-dot"></span> HOME MEMORY <span class="food-dot"></span> FOOD VALUE REINFORCEMENT</div>
+		{#if view === 'signals' || showVision}
+			<div class="signal-key">
+				<span class="home-dot"></span> HOME
+				<span class="food-dot"></span> FOOD
+				<span class="warning-dot"></span> DOUBT
+				{#if showVision}<span class="vision-dot"></span> FOCUS SCOUT{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -458,6 +510,7 @@
 		{:else}
 			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>SIGNALS {showSignals ? 'ON' : 'OFF'}</button>
 		{/if}
+		<button class:active={showVision} type="button" onclick={() => { showVision = !showVision; persistSettings(); }}>SCOUT VISION {showVision ? 'ON' : 'OFF'}</button>
 		<button class:active={!playing} type="button" onclick={() => (playing = !playing)}>{playing ? 'PAUSE' : 'RESUME'} COLONY</button>
 		<button type="button" onclick={resetColony}>NEW COLONY ↻</button>
 	</section>

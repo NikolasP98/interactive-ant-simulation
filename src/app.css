@@ -200,9 +200,18 @@ canvas.hidden {
 	margin-left: 0.55rem;
 	background: #df6747;
 }
+.warning-dot {
+	margin-left: 0.55rem;
+	background: #913f68;
+}
+.vision-dot {
+	margin-left: 0.55rem;
+	border: 2px solid #9bb922;
+	background: #d8ed57;
+}
 .controls {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(130px, 1fr)) repeat(4, minmax(95px, auto));
+	grid-template-columns: repeat(3, minmax(116px, 1fr)) repeat(5, minmax(82px, auto));
 	border-top: 1px solid #293029;
 }
 .controls label {
