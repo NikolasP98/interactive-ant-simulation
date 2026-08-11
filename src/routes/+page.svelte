@@ -139,7 +139,7 @@
 					);
 					const value = Math.max(home, food, warning);
 					context.globalAlpha = 0.22 + value * 0.7;
-					context.fillStyle = warning > Math.max(home, food) ? '#913f68' : food > home ? '#df6747' : '#4e91bd';
+					context.fillStyle = warning > Math.max(home, food) ? '#d34b83' : food > home ? '#ff6848' : '#2ba9eb';
 					context.beginPath();
 					context.arc(point.x, point.y, 1.25 + value * 2, 0, Math.PI * 2);
 					context.fill();
@@ -160,7 +160,7 @@
 					)
 				);
 				context.save();
-				context.fillStyle = ant.sensorKind === 'home' ? 'rgba(23,135,199,.12)' : 'rgba(229,82,50,.12)';
+				context.fillStyle = ant.sensorKind === 'home' ? 'rgba(43,169,235,.12)' : 'rgba(255,104,72,.12)';
 				context.beginPath();
 				context.moveTo(origin.x, origin.y);
 				context.lineTo(endpoints[0].x, endpoints[0].y);
@@ -169,7 +169,7 @@
 				context.fill();
 				for (let index = 0; index < endpoints.length; index += 1) {
 					const warningWins = ant.sensorWarnings[index] > ant.sensorReadings[index] * 0.7;
-					context.strokeStyle = warningWins ? '#913f68' : ant.sensorKind === 'home' ? '#1787c7' : '#e55232';
+					context.strokeStyle = warningWins ? '#d34b83' : ant.sensorKind === 'home' ? '#2ba9eb' : '#ff6848';
 					context.globalAlpha = 0.35 + Math.max(ant.sensorReadings[index], ant.sensorWarnings[index]) * 0.65;
 					context.beginPath();
 					context.moveTo(origin.x, origin.y);

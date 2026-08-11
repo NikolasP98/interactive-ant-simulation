@@ -194,15 +194,15 @@ canvas.hidden {
 	border-radius: 50%;
 }
 .home-dot {
-	background: #4e91bd;
+	background: #2ba9eb;
 }
 .food-dot {
 	margin-left: 0.55rem;
-	background: #df6747;
+	background: #ff6848;
 }
 .warning-dot {
 	margin-left: 0.55rem;
-	background: #913f68;
+	background: #d34b83;
 }
 .vision-dot {
 	margin-left: 0.55rem;

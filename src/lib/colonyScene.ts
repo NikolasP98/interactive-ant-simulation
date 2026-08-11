@@ -10,9 +10,9 @@ const scratchColor = new THREE.Color();
 const yAxis = new THREE.Vector3(0, 1, 0);
 const appendageDirection = new THREE.Vector3();
 const grassColor = new THREE.Color('#91ad6a');
-const homeSignalColor = new THREE.Color('#1787c7');
-const foodSignalColor = new THREE.Color('#e55232');
-const warningSignalColor = new THREE.Color('#913f68');
+const homeSignalColor = new THREE.Color('#2ba9eb');
+const foodSignalColor = new THREE.Color('#ff6848');
+const warningSignalColor = new THREE.Color('#d34b83');
 const neutralSignalColor = new THREE.Color('#8f9588');
 
 function labelSprite(text: string, accent: string, scale = 1): THREE.Sprite {
@@ -41,22 +41,6 @@ function labelSprite(text: string, accent: string, scale = 1): THREE.Sprite {
 	sprite.scale.set(3.45 * scale, 0.6 * scale, 1);
 	sprite.frustumCulled = false;
 	return sprite;
-}
-
-function signalTexture(): THREE.CanvasTexture {
-	const canvas = document.createElement('canvas');
-	canvas.width = 64;
-	canvas.height = 64;
-	const context = canvas.getContext('2d')!;
-	const gradient = context.createRadialGradient(32, 32, 3, 32, 32, 30);
-	gradient.addColorStop(0, 'rgba(255,255,255,1)');
-	gradient.addColorStop(0.56, 'rgba(255,255,255,.9)');
-	gradient.addColorStop(1, 'rgba(255,255,255,0)');
-	context.fillStyle = gradient;
-	context.fillRect(0, 0, 64, 64);
-	const texture = new THREE.CanvasTexture(canvas);
-	texture.colorSpace = THREE.SRGBColorSpace;
-	return texture;
 }
 
 function rectangularGrid(width: number, depth: number): THREE.LineSegments {
@@ -151,9 +135,8 @@ export class ColonyScene {
 	private legMeshes: THREE.InstancedMesh[] = [];
 	private antennaMeshes: THREE.InstancedMesh[] = [];
 	private cargoMesh: THREE.InstancedMesh;
-	private pheromones: THREE.Points;
-	private pheromonePositions: Float32Array;
-	private pheromoneColors: Float32Array;
+	private pheromones: THREE.InstancedMesh;
+	private pheromoneSpotScale = 1;
 	private visionCone: THREE.Mesh;
 	private visionRays: THREE.LineSegments;
 	private visionRayPositions = new Float32Array(SENSOR_OFFSETS.length * 6);
@@ -284,25 +267,21 @@ export class ColonyScene {
 		this.scene.add(this.cargoMesh);
 
 		const maximumPoints = simulation.columns * simulation.rows * 3;
-		this.pheromonePositions = new Float32Array(maximumPoints * 3);
-		this.pheromoneColors = new Float32Array(maximumPoints * 3);
-		const pheromoneGeometry = new THREE.BufferGeometry();
-		pheromoneGeometry.setAttribute('position', new THREE.BufferAttribute(this.pheromonePositions, 3));
-		pheromoneGeometry.setAttribute('color', new THREE.BufferAttribute(this.pheromoneColors, 3));
-		this.pheromones = new THREE.Points(
-			pheromoneGeometry,
-			new THREE.PointsMaterial({
-				size: 0.18,
-				map: signalTexture(),
-				alphaTest: 0.05,
-				vertexColors: true,
+		this.pheromones = new THREE.InstancedMesh(
+			new THREE.CircleGeometry(0.5, 12),
+			new THREE.MeshBasicMaterial({
 				transparent: true,
-				opacity: 0.84,
+				opacity: 0.8,
 				depthWrite: false,
 				depthTest: true,
-				sizeAttenuation: true
-			})
+				polygonOffset: true,
+				polygonOffsetFactor: -2,
+				side: THREE.DoubleSide
+			}),
+			maximumPoints
 		);
+		this.pheromones.count = 0;
+		this.pheromones.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 		this.pheromones.frustumCulled = false;
 		this.pheromones.renderOrder = 2;
 		this.scene.add(this.pheromones);
@@ -371,14 +350,14 @@ export class ColonyScene {
 			this.camera.position.set(0.01, 16.5, 0.01);
 			this.camera.zoom = 0.68;
 			this.controls.target.set(0, 0.25, 0);
-			(this.pheromones.material as THREE.PointsMaterial).size = 0.31;
-			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.94;
+			this.pheromoneSpotScale = 1.18;
+			(this.pheromones.material as THREE.MeshBasicMaterial).opacity = 0.9;
 		} else {
 			this.camera.position.set(12, 10, 12);
 			this.camera.zoom = 1;
 			this.controls.target.set(0, 0.28, 0);
-			(this.pheromones.material as THREE.PointsMaterial).size = 0.22;
-			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.86;
+			this.pheromoneSpotScale = 1;
+			(this.pheromones.material as THREE.MeshBasicMaterial).opacity = 0.8;
 		}
 		this.controls.enableRotate = true;
 		this.camera.updateProjectionMatrix();
@@ -645,20 +624,24 @@ export class ColonyScene {
 					[warningTrail[index], warningSignalColor]
 				] as const) {
 					if (value < 0.008) continue;
-					const offset = point * 3;
-					this.pheromonePositions[offset] = -width / 2 + ((column + 0.5) / columns) * width;
-					this.pheromonePositions[offset + 1] = 0.7 + value * 0.045;
-					this.pheromonePositions[offset + 2] = -depth / 2 + ((row + 0.5) / rows) * depth;
-					scratchColor.copy(color).lerp(grassColor, Math.max(0, 0.18 - value * 0.16));
-					this.pheromoneColors[offset] = scratchColor.r;
-					this.pheromoneColors[offset + 1] = scratchColor.g;
-					this.pheromoneColors[offset + 2] = scratchColor.b;
+					const size = (0.14 + Math.sqrt(value) * 0.16) * this.pheromoneSpotScale;
+					scratch.position.set(
+						-width / 2 + ((column + 0.5) / columns) * width,
+						0.588,
+						-depth / 2 + ((row + 0.5) / rows) * depth
+					);
+					scratch.rotation.set(-Math.PI / 2, 0, 0);
+					scratch.scale.set(size, size, 1);
+					scratch.updateMatrix();
+					this.pheromones.setMatrixAt(point, scratch.matrix);
+					scratchColor.copy(color);
+					this.pheromones.setColorAt(point, scratchColor);
 					point += 1;
 				}
 			}
 		}
-		this.pheromones.geometry.setDrawRange(0, point);
-		(this.pheromones.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-		(this.pheromones.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+		this.pheromones.count = point;
+		this.pheromones.instanceMatrix.needsUpdate = true;
+		if (this.pheromones.instanceColor) this.pheromones.instanceColor.needsUpdate = true;
 	}
 }
