@@ -15,11 +15,13 @@ body {
 	overflow: hidden;
 }
 button,
-input {
+input,
+select {
 	font: inherit;
 }
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
 	outline: 3px solid #d8ed57;
 	outline-offset: -3px;
 }
@@ -141,6 +143,11 @@ canvas.hidden {
 .view-note span {
 	color: #245f9f;
 }
+.view-note small {
+	color: #697069;
+	font: 700 0.48rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+	letter-spacing: 0.06em;
+}
 .view-note strong {
 	font: 600 clamp(0.92rem, 1.8vw, 1.28rem) / 1.05 Georgia, 'Times New Roman', serif;
 }
@@ -155,7 +162,7 @@ canvas.hidden {
 .readout span {
 	display: grid;
 	gap: 0.18rem;
-	min-width: 86px;
+	min-width: 78px;
 	padding: 0.55rem 0.7rem;
 	background: rgb(247 244 233 / 94%);
 }
@@ -195,7 +202,7 @@ canvas.hidden {
 }
 .controls {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(150px, 1fr)) repeat(3, minmax(105px, auto));
+	grid-template-columns: repeat(3, minmax(130px, 1fr)) repeat(4, minmax(95px, auto));
 	border-top: 1px solid #293029;
 }
 .controls label {
@@ -218,6 +225,16 @@ canvas.hidden {
 input {
 	width: 100%;
 	accent-color: #245f9f;
+}
+select {
+	width: 100%;
+	min-width: 0;
+	border: 1px solid rgb(41 48 41 / 45%);
+	border-radius: 0;
+	background: #f3f0e6;
+	color: #293029;
+	font: 700 0.52rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+	letter-spacing: 0.025em;
 }
 .controls button {
 	min-height: 62px;
@@ -265,12 +282,15 @@ main[data-mode='blog'] .controls button {
 		min-width: 72px;
 	}
 	.controls {
-		grid-template-columns: 1fr 1fr 1fr;
+		grid-template-columns: 1fr 1fr;
 	}
 	.controls label {
-		grid-column: span 3;
-		border-right: 0;
+		grid-column: auto;
+		border-right: 1px solid #293029;
 		border-bottom: 1px solid #293029;
+	}
+	.controls .select-control {
+		grid-column: 1 / -1;
 	}
 	.view-note {
 		top: 0.65rem;
@@ -280,7 +300,7 @@ main[data-mode='blog'] .controls button {
 		top: 0.65rem;
 		right: 0.65rem;
 	}
-	.readout span:nth-child(2) {
+	.readout span:nth-child(n + 2) {
 		display: none;
 	}
 	.instruction {
@@ -304,17 +324,8 @@ main[data-mode='blog'] .controls button {
 		min-width: 64px;
 		padding-inline: 0.35rem;
 	}
-	.controls {
-		grid-template-columns: repeat(2, 1fr);
-	}
-	.controls label {
-		grid-column: 1 / -1;
-	}
 	.controls button {
 		min-height: 50px;
-	}
-	.controls button:nth-last-child(3) {
-		display: none;
 	}
 	.view-note strong {
 		display: none;

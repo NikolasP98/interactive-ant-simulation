@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ColonyScene, type ColonyView, type ResourcePreset } from '$lib/colonyScene';
-	import { ColonySimulation } from '$lib/simulation';
+	import { ColonySimulation, type Temperament } from '$lib/simulation';
 	import '../app.css';
 
 	const availableViews: ColonyView[] = ['habitat', 'signals', 'map'];
@@ -17,9 +17,13 @@
 	let showSignals = $state(true);
 	let population = $state(52);
 	let persistence = $state(68);
+	let diffusion = $state(46);
 	let simSpeed = $state(1);
+	let temperament = $state<Temperament>('adaptive');
 	let delivered = $state(0);
+	let harvest = $state(0);
 	let carrying = $state(0);
+	let obstacleCount = $state(0);
 	let pointerStart = { x: 0, y: 0 };
 	let simulation: ColonySimulation | null = null;
 	let colonyScene: ColonyScene | null = null;
@@ -35,11 +39,21 @@
 	const persistSettings = () => {
 		if (!simulation) return;
 		simulation.settings.persistence = persistence;
+		simulation.settings.diffusion = diffusion;
 		simulation.settings.speed = simSpeed;
+		simulation.setTemperament(temperament);
 		simulation.resizePopulation(population);
 		localStorage.setItem(
 			`pinoniteAntLab:${session}`,
-			JSON.stringify({ population, persistence, simSpeed, showSignals, food: simulation.food })
+			JSON.stringify({
+				population,
+				persistence,
+				diffusion,
+				simSpeed,
+				temperament,
+				showSignals,
+				food: simulation.food
+			})
 		);
 	};
 
@@ -50,7 +64,15 @@
 
 	const resetColony = () => {
 		simulation?.reset();
+		obstacleCount = 0;
 		persistSettings();
+	};
+
+	const changeObstacle = () => {
+		if (!simulation) return;
+		if (simulation.obstacles.length >= 3) simulation.clearObstacles();
+		else simulation.addObstacleOnRoute();
+		obstacleCount = simulation.obstacles.length;
 	};
 
 	const clickGround = (event: PointerEvent) => {
@@ -105,7 +127,7 @@
 					const index = row * simulation.columns + column;
 					const home = simulation.homeTrail[index];
 					const food = simulation.foodTrail[index];
-					if (home < 0.06 && food < 0.06) continue;
+					if (home < 0.018 && food < 0.018) continue;
 					const point = toScreen(
 						-simulation.width / 2 + ((column + 0.5) / simulation.columns) * simulation.width,
 						-simulation.depth / 2 + ((row + 0.5) / simulation.rows) * simulation.depth
@@ -121,11 +143,58 @@
 			context.globalAlpha = 1;
 		}
 
+		for (const obstacle of simulation.obstacles) {
+			const point = toScreen(obstacle.x, obstacle.z);
+			const radius = (obstacle.radius / simulation.width) * fieldWidth;
+			context.save();
+			context.translate(point.x, point.y);
+			if (obstacle.kind === 'log') {
+				context.rotate(0.42 + Number(obstacle.id.replace(/\D/g, '') || 0) * 0.77);
+				context.fillStyle = '#6f5034';
+				context.strokeStyle = '#3e2a1e';
+				context.lineWidth = 1.5;
+				context.fillRect(-radius, -radius * 0.26, radius * 2, radius * 0.52);
+				context.strokeRect(-radius, -radius * 0.26, radius * 2, radius * 0.52);
+			} else {
+				for (let index = 0; index < 4; index += 1) {
+					context.fillStyle = index % 2 ? '#7f8377' : '#a0a395';
+					context.beginPath();
+					context.arc(
+						Math.cos(index * 1.7) * radius * 0.38,
+						Math.sin(index * 1.7) * radius * 0.34,
+						radius * (0.3 + (index % 2) * 0.09),
+						0,
+						Math.PI * 2
+					);
+					context.fill();
+				}
+			}
+			context.restore();
+		}
+
 		for (const ant of simulation.ants) {
 			const point = toScreen(ant.x, ant.z);
 			context.save();
 			context.translate(point.x, point.y);
 			context.rotate(ant.angle);
+			context.strokeStyle = '#3b281d';
+			context.lineWidth = 1.1;
+			for (let pair = 0; pair < 3; pair += 1) {
+				for (const side of [-1, 1]) {
+					const stride = Math.sin(ant.phase + pair * Math.PI + (side > 0 ? Math.PI : 0)) * 2.2;
+					const originX = [3, 0, -3][pair];
+					context.beginPath();
+					context.moveTo(originX, side * 1.5);
+					context.lineTo(originX + [4, 0, -4][pair] + stride, side * 6);
+					context.stroke();
+				}
+			}
+			for (const side of [-1, 1]) {
+				context.beginPath();
+				context.moveTo(5, side);
+				context.lineTo(10, side * 3.5 + Math.sin(ant.phase * 0.4 + side));
+				context.stroke();
+			}
 			context.fillStyle = '#2d2018';
 			for (const [offset, radius] of [
 				[-4.5, 3.2],
@@ -137,9 +206,11 @@
 				context.fill();
 			}
 			if (ant.hasFood) {
-				context.fillStyle = '#e6c842';
+				context.fillStyle =
+					simulation.foods.find((food) => food.id === ant.carryingFoodId)?.color ?? '#e6c842';
 				context.beginPath();
-				context.arc(8, 0, 2.4, 0, Math.PI * 2);
+				const pickupOffset = ant.action === 'pickup' ? 10 - ant.actionProgress * 2 : 8;
+				context.arc(pickupOffset, 0, 2.4 + ant.carryingValue * 0.18, 0, Math.PI * 2);
 				context.fill();
 			}
 			context.restore();
@@ -154,12 +225,25 @@
 		context.beginPath();
 		context.arc(nest.x, nest.y, 7, 0, Math.PI * 2);
 		context.fill();
-		const food = toScreen(simulation.food.x, simulation.food.z);
-		for (let index = 0; index < 6; index += 1) {
-			context.fillStyle = ['#d8ed57', '#e5c64f', '#c96043'][index % 3];
-			context.beginPath();
-			context.arc(food.x + Math.cos(index) * 8, food.y + Math.sin(index) * 7, 5, 0, Math.PI * 2);
-			context.fill();
+		for (const source of simulation.foods) {
+			const food = toScreen(source.x, source.z);
+			const pieces = 4 + source.value * 2;
+			for (let index = 0; index < pieces; index += 1) {
+				context.fillStyle = index % 3 === 2 ? '#d8ed57' : source.color;
+				context.beginPath();
+				context.arc(
+					food.x + Math.cos(index) * (5 + source.value),
+					food.y + Math.sin(index) * (5 + source.value),
+					3.4 + source.value * 0.6,
+					0,
+					Math.PI * 2
+				);
+				context.fill();
+			}
+			context.fillStyle = '#293029';
+			context.font = '700 9px ui-monospace, monospace';
+			context.textAlign = 'center';
+			context.fillText(source.label, food.x, food.y - 13 - source.value * 2);
 		}
 	};
 
@@ -177,13 +261,23 @@
 				const settings = JSON.parse(saved);
 				population = Number(settings.population) || population;
 				persistence = Number(settings.persistence) || persistence;
+				diffusion = Number(settings.diffusion) || diffusion;
 				simSpeed = Number(settings.simSpeed) || simSpeed;
+				temperament = ['curious', 'adaptive', 'disciplined'].includes(settings.temperament)
+					? settings.temperament
+					: temperament;
 				showSignals = settings.showSignals ?? showSignals;
 			} catch {
 				// Ignore older or incomplete settings snapshots.
 			}
 		}
-		simulation = new ColonySimulation(session, { population, persistence, speed: simSpeed });
+		simulation = new ColonySimulation(session, {
+			population,
+			persistence,
+			diffusion,
+			speed: simSpeed,
+			temperament
+		});
 		if (saved) {
 			try {
 				const food = JSON.parse(saved).food;
@@ -221,14 +315,16 @@
 					const context = mapCanvas!.getContext('2d');
 					if (context) drawMap(context, rect.width, rect.height);
 				} else {
-					colonyScene?.setSignalsVisible(showSignals);
+					colonyScene?.setSignalsVisible(view === 'signals' || showSignals);
 					colonyScene?.render();
 				}
 			}
 			readoutClock += delta;
 			if (readoutClock > 0.2 && simulation) {
 				delivered = simulation.deliveries;
+				harvest = simulation.harvestValue;
 				carrying = simulation.ants.filter((ant) => ant.hasFood).length;
+				obstacleCount = simulation.obstacles.length;
 				readoutClock = 0;
 			}
 			raf = requestAnimationFrame(frame);
@@ -302,16 +398,18 @@
 						? 'The ground keeps the colony’s memory'
 						: 'The original idea, kept in view'}
 			</strong>
+			<small>{temperament.toUpperCase()} TEMPERAMENT · {obstacleCount} BLOCKS</small>
 		</div>
 		<div class="readout" aria-live="polite">
 			<span><b>{String(delivered).padStart(2, '0')}</b> DELIVERIES</span>
+			<span><b>{String(harvest).padStart(2, '0')}</b> FOOD VALUE</span>
 			<span><b>{String(carrying).padStart(2, '0')}</b> RETURNING</span>
 		</div>
 		<div class="instruction">
-			{view === 'map' ? 'CLICK FIELD TO MOVE FOOD' : 'DRAG TO ORBIT · CLICK GROUND TO MOVE FOOD'} ↗
+			{view === 'map' ? 'CLICK FIELD TO MOVE RICH FOOD' : 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
 		</div>
 		{#if view === 'signals'}
-			<div class="signal-key"><span class="home-dot"></span> HOME MEMORY <span class="food-dot"></span> FOOD MEMORY</div>
+			<div class="signal-key"><span class="home-dot"></span> HOME MEMORY <span class="food-dot"></span> FOOD VALUE REINFORCEMENT</div>
 		{/if}
 	</section>
 
@@ -325,17 +423,15 @@
 				<span>TIME SCALE <output>{simSpeed.toFixed(1)}×</output></span>
 				<input type="range" min="0.4" max="2" step="0.1" bind:value={simSpeed} oninput={persistSettings} />
 			</label>
-			<button type="button" onclick={() => colonyScene?.resetOrbit()}>RESET ORBIT ↻</button>
 		{:else if view === 'signals'}
 			<label>
 				<span>TRAIL PERSISTENCE <output>{persistence}%</output></span>
 				<input type="range" min="20" max="96" bind:value={persistence} oninput={persistSettings} />
 			</label>
 			<label>
-				<span>FORAGERS <output>{population}</output></span>
-				<input type="range" min="12" max={resourcePreset === 'conserve' ? 64 : 100} bind:value={population} oninput={persistSettings} />
+				<span>FIELD DIFFUSION <output>{diffusion}%</output></span>
+				<input type="range" min="8" max="82" bind:value={diffusion} oninput={persistSettings} />
 			</label>
-			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>SIGNALS {showSignals ? 'ON' : 'OFF'}</button>
 		{:else}
 			<label>
 				<span>TRAIL PERSISTENCE <output>{persistence}%</output></span>
@@ -345,6 +441,21 @@
 				<span>FORAGERS <output>{population}</output></span>
 				<input type="range" min="12" max={resourcePreset === 'conserve' ? 64 : 100} bind:value={population} oninput={persistSettings} />
 			</label>
+		{/if}
+		<label class="select-control">
+			<span>COLONY TEMPERAMENT</span>
+			<select bind:value={temperament} onchange={persistSettings} aria-label="Colony temperament">
+				<option value="curious">CURIOUS / EXPLORES</option>
+				<option value="adaptive">ADAPTIVE / BALANCED</option>
+				<option value="disciplined">DISCIPLINED / FOLLOWS</option>
+			</select>
+		</label>
+		<button type="button" class:active={obstacleCount > 0} onclick={changeObstacle}>
+			{obstacleCount >= 3 ? 'CLEAR 3 BLOCKS' : `BLOCK BUSY TRAIL ${obstacleCount}/3`}
+		</button>
+		{#if view === 'signals'}
+			<button type="button" onclick={() => colonyScene?.resetOrbit()}>RESET FIELD VIEW ↻</button>
+		{:else}
 			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>SIGNALS {showSignals ? 'ON' : 'OFF'}</button>
 		{/if}
 		<button class:active={!playing} type="button" onclick={() => (playing = !playing)}>{playing ? 'PAUSE' : 'RESUME'} COLONY</button>

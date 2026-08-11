@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { ColonySimulation } from './simulation';
+import type { AntAgent, ColonySimulation, FoodSource, Obstacle } from './simulation';
 
 export type ColonyView = 'habitat' | 'signals' | 'map';
 export type ResourcePreset = 'conserve' | 'balanced' | 'full';
 
 const scratch = new THREE.Object3D();
 const scratchColor = new THREE.Color();
+const yAxis = new THREE.Vector3(0, 1, 0);
+const appendageDirection = new THREE.Vector3();
 const grassColor = new THREE.Color('#91ad6a');
-const homeSignalColor = new THREE.Color('#4e91bd');
-const foodSignalColor = new THREE.Color('#df6747');
+const homeSignalColor = new THREE.Color('#1787c7');
+const foodSignalColor = new THREE.Color('#e55232');
 
-function labelSprite(text: string, accent: string): THREE.Sprite {
+function labelSprite(text: string, accent: string, scale = 1): THREE.Sprite {
 	const canvas = document.createElement('canvas');
 	canvas.width = 1024;
 	canvas.height = 176;
@@ -31,10 +33,28 @@ function labelSprite(text: string, accent: string): THREE.Sprite {
 	const texture = new THREE.CanvasTexture(canvas);
 	texture.colorSpace = THREE.SRGBColorSpace;
 	texture.minFilter = THREE.LinearFilter;
+	texture.generateMipmaps = true;
 	const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: true });
 	const sprite = new THREE.Sprite(material);
-	sprite.scale.set(3.45, 0.6, 1);
+	sprite.scale.set(3.45 * scale, 0.6 * scale, 1);
+	sprite.frustumCulled = false;
 	return sprite;
+}
+
+function signalTexture(): THREE.CanvasTexture {
+	const canvas = document.createElement('canvas');
+	canvas.width = 64;
+	canvas.height = 64;
+	const context = canvas.getContext('2d')!;
+	const gradient = context.createRadialGradient(32, 32, 3, 32, 32, 30);
+	gradient.addColorStop(0, 'rgba(255,255,255,1)');
+	gradient.addColorStop(0.56, 'rgba(255,255,255,.9)');
+	gradient.addColorStop(1, 'rgba(255,255,255,0)');
+	context.fillStyle = gradient;
+	context.fillRect(0, 0, 64, 64);
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.colorSpace = THREE.SRGBColorSpace;
+	return texture;
 }
 
 function rectangularGrid(width: number, depth: number): THREE.LineSegments {
@@ -49,8 +69,70 @@ function rectangularGrid(width: number, depth: number): THREE.LineSegments {
 	geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
 	return new THREE.LineSegments(
 		geometry,
-		new THREE.LineBasicMaterial({ color: '#53634a', transparent: true, opacity: 0.16 })
+		new THREE.LineBasicMaterial({ color: '#53634a', transparent: true, opacity: 0.13 })
 	);
+}
+
+function foodVisual(food: FoodSource, fullShadows: boolean): THREE.Group {
+	const group = new THREE.Group();
+	const baseColor = new THREE.Color(food.color);
+	const colors = [baseColor, baseColor.clone().offsetHSL(0.04, 0.08, 0.1), new THREE.Color('#d8ed57')];
+	const pieces = 5 + food.value * 2;
+	for (let index = 0; index < pieces; index += 1) {
+		const crumb = new THREE.Mesh(
+			new THREE.DodecahedronGeometry(0.14 + food.value * 0.022 + (index % 3) * 0.025, 0),
+			new THREE.MeshStandardMaterial({ color: colors[index % colors.length], roughness: 0.76 })
+		);
+		const angle = (index / pieces) * Math.PI * 2;
+		const ring = 0.23 + (index % 3) * 0.07;
+		crumb.position.set(Math.cos(angle) * ring, 0.14 + (index % 2) * 0.12, Math.sin(angle) * ring);
+		crumb.rotation.set(index * 0.3, index * 0.7, index * 0.2);
+		crumb.castShadow = fullShadows;
+		crumb.frustumCulled = false;
+		group.add(crumb);
+	}
+	group.frustumCulled = false;
+	return group;
+}
+
+function obstacleVisual(obstacle: Obstacle, fullShadows: boolean): THREE.Group {
+	const group = new THREE.Group();
+	if (obstacle.kind === 'log') {
+		const bark = new THREE.MeshStandardMaterial({ color: '#6f5034', roughness: 0.98 });
+		const log = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.29, 1.55, 12), bark);
+		log.rotation.z = Math.PI / 2;
+		log.position.y = 0.22;
+		log.castShadow = fullShadows;
+		log.frustumCulled = false;
+		group.rotation.y = 0.42 + Number(obstacle.id.replace(/\D/g, '') || 0) * 0.77;
+		group.add(log);
+		for (const side of [-1, 1]) {
+			const cap = new THREE.Mesh(
+				new THREE.CircleGeometry(side < 0 ? 0.24 : 0.29, 12),
+				new THREE.MeshStandardMaterial({ color: '#b18a56', roughness: 1 })
+			);
+			cap.rotation.y = side * Math.PI / 2;
+			cap.position.set(side * 0.78, 0.22, 0);
+			cap.frustumCulled = false;
+			group.add(cap);
+		}
+	} else {
+		for (let index = 0; index < 4; index += 1) {
+			const rock = new THREE.Mesh(
+				new THREE.DodecahedronGeometry(0.3 + (index % 2) * 0.1, 0),
+				new THREE.MeshStandardMaterial({ color: index % 2 ? '#7f8377' : '#a0a395', roughness: 1 })
+			);
+			const angle = (index / 4) * Math.PI * 2;
+			rock.position.set(Math.cos(angle) * 0.3, 0.19 + (index % 2) * 0.08, Math.sin(angle) * 0.26);
+			rock.rotation.set(index, index * 0.35, index * 0.7);
+			rock.castShadow = fullShadows;
+			rock.frustumCulled = false;
+			group.add(rock);
+		}
+	}
+	group.position.set(obstacle.x, 0.58, obstacle.z);
+	group.frustumCulled = false;
+	return group;
 }
 
 export class ColonyScene {
@@ -64,13 +146,16 @@ export class ColonyScene {
 	private preset: ResourcePreset;
 	private view: ColonyView = 'habitat';
 	private bodyMeshes: THREE.InstancedMesh[] = [];
+	private legMeshes: THREE.InstancedMesh[] = [];
+	private antennaMeshes: THREE.InstancedMesh[] = [];
 	private cargoMesh: THREE.InstancedMesh;
 	private pheromones: THREE.Points;
 	private pheromonePositions: Float32Array;
 	private pheromoneColors: Float32Array;
-	private foodGroup = new THREE.Group();
+	private foodGroups = new Map<string, THREE.Group>();
+	private foodLabels = new Map<string, THREE.Sprite>();
+	private obstacleGroups = new Map<string, THREE.Group>();
 	private nestLabel = labelSprite('NEST / HOME', '#4e91bd');
-	private foodLabel = labelSprite('FOOD / MOVE HERE', '#df6747');
 	private frameCount = 0;
 
 	constructor(canvas: HTMLCanvasElement, simulation: ColonySimulation, preset: ResourcePreset) {
@@ -91,11 +176,11 @@ export class ColonyScene {
 		this.controls.enableDamping = true;
 		this.controls.dampingFactor = 0.08;
 		this.controls.enablePan = false;
-		this.controls.minZoom = 0.76;
-		this.controls.maxZoom = 1.75;
+		this.controls.minZoom = 0.62;
+		this.controls.maxZoom = 2.35;
 		this.controls.minPolarAngle = 0.16;
-		this.controls.maxPolarAngle = Math.PI / 2.22;
-		this.controls.target.set(0, 0.2, 0);
+		this.controls.maxPolarAngle = Math.PI / 2.16;
+		this.controls.target.set(0, 0.28, 0);
 
 		this.scene.add(new THREE.HemisphereLight(0xfff9e9, 0x59654f, 2.1));
 		const sunlight = new THREE.DirectionalLight(0xfff5d7, 3.1);
@@ -133,19 +218,14 @@ export class ColonyScene {
 		entrance.position.set(simulation.nest.x, 0.77, simulation.nest.z);
 		this.scene.add(entrance);
 
-		const foodColors = ['#d8ed57', '#e5c64f', '#c96043'];
-		for (let index = 0; index < 7; index += 1) {
-			const crumb = new THREE.Mesh(
-				new THREE.DodecahedronGeometry(0.19 + (index % 3) * 0.035, 0),
-				new THREE.MeshStandardMaterial({ color: foodColors[index % foodColors.length], roughness: 0.78 })
-			);
-			const angle = (index / 7) * Math.PI * 2;
-			crumb.position.set(Math.cos(angle) * 0.34, 0.18 + (index % 2) * 0.13, Math.sin(angle) * 0.3);
-			crumb.rotation.set(index * 0.3, index * 0.7, index * 0.2);
-			crumb.castShadow = preset === 'full';
-			this.foodGroup.add(crumb);
+		for (const food of simulation.foods) {
+			const group = foodVisual(food, preset === 'full');
+			this.foodGroups.set(food.id, group);
+			this.scene.add(group);
+			const label = labelSprite(food.label, food.color, food.value > 1 ? 1.08 : 0.94);
+			this.foodLabels.set(food.id, label);
+			this.scene.add(label);
 		}
-		this.scene.add(this.foodGroup);
 
 		const antMaterial = new THREE.MeshStandardMaterial({ color: '#2d2018', roughness: 0.72 });
 		const bodyParts = [
@@ -158,15 +238,41 @@ export class ColonyScene {
 			mesh.userData.part = part;
 			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 			mesh.castShadow = preset === 'full';
+			mesh.frustumCulled = false;
 			this.bodyMeshes.push(mesh);
 			this.scene.add(mesh);
 		}
+
+		const appendageGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.19, 5);
+		const appendageMaterial = new THREE.MeshStandardMaterial({ color: '#3b281d', roughness: 0.86 });
+		for (let index = 0; index < 6; index += 1) {
+			const mesh = new THREE.InstancedMesh(appendageGeometry, appendageMaterial, 120);
+			mesh.userData.leg = { pair: Math.floor(index / 2), side: index % 2 === 0 ? -1 : 1 };
+			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+			mesh.frustumCulled = false;
+			this.legMeshes.push(mesh);
+			this.scene.add(mesh);
+		}
+		for (let index = 0; index < 2; index += 1) {
+			const mesh = new THREE.InstancedMesh(
+				new THREE.CylinderGeometry(0.009, 0.009, 0.17, 5),
+				appendageMaterial,
+				120
+			);
+			mesh.userData.side = index === 0 ? -1 : 1;
+			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+			mesh.frustumCulled = false;
+			this.antennaMeshes.push(mesh);
+			this.scene.add(mesh);
+		}
+
 		this.cargoMesh = new THREE.InstancedMesh(
-			new THREE.DodecahedronGeometry(0.07, 0),
-			new THREE.MeshStandardMaterial({ color: '#f1d24b', emissive: '#6b5610', emissiveIntensity: 0.16 }),
+			new THREE.DodecahedronGeometry(0.075, 0),
+			new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.72 }),
 			120
 		);
 		this.cargoMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+		this.cargoMesh.frustumCulled = false;
 		this.scene.add(this.cargoMesh);
 
 		const maximumPoints = simulation.columns * simulation.rows * 2;
@@ -178,19 +284,23 @@ export class ColonyScene {
 		this.pheromones = new THREE.Points(
 			pheromoneGeometry,
 			new THREE.PointsMaterial({
-				size: 0.095,
+				size: 0.18,
+				map: signalTexture(),
+				alphaTest: 0.05,
 				vertexColors: true,
 				transparent: true,
-				opacity: 0.76,
+				opacity: 0.84,
 				depthWrite: false,
+				depthTest: true,
 				sizeAttenuation: true
 			})
 		);
+		this.pheromones.frustumCulled = false;
+		this.pheromones.renderOrder = 2;
 		this.scene.add(this.pheromones);
 
 		this.nestLabel.position.set(simulation.nest.x, 1.55, simulation.nest.z);
-		this.foodLabel.position.set(simulation.food.x, 1.55, simulation.food.z);
-		this.scene.add(this.nestLabel, this.foodLabel);
+		this.scene.add(this.nestLabel);
 		this.setView('habitat');
 	}
 
@@ -199,19 +309,18 @@ export class ColonyScene {
 		this.view = view;
 		if (view === 'signals') {
 			this.camera.position.set(0.01, 16.5, 0.01);
-			this.camera.zoom = 0.66;
+			this.camera.zoom = 0.68;
 			this.controls.target.set(0, 0.25, 0);
-			this.controls.enableRotate = true;
-			(this.pheromones.material as THREE.PointsMaterial).size = 0.14;
-			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.96;
+			(this.pheromones.material as THREE.PointsMaterial).size = 0.31;
+			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.94;
 		} else {
 			this.camera.position.set(12, 10, 12);
 			this.camera.zoom = 1;
-			this.controls.target.set(0, 0.2, 0);
-			this.controls.enableRotate = true;
-			(this.pheromones.material as THREE.PointsMaterial).size = 0.09;
-			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.62;
+			this.controls.target.set(0, 0.28, 0);
+			(this.pheromones.material as THREE.PointsMaterial).size = 0.22;
+			(this.pheromones.material as THREE.PointsMaterial).opacity = 0.86;
 		}
+		this.controls.enableRotate = true;
 		this.camera.updateProjectionMatrix();
 		this.controls.update();
 	}
@@ -253,8 +362,8 @@ export class ColonyScene {
 	render(): void {
 		this.frameCount += 1;
 		this.controls.update();
-		this.foodGroup.position.set(this.simulation.food.x, 0.58, this.simulation.food.z);
-		this.foodLabel.position.set(this.simulation.food.x, 1.55, this.simulation.food.z);
+		this.syncFoodVisuals();
+		this.syncObstacleVisuals();
 		this.updateAntInstances();
 		if (this.frameCount % (this.preset === 'conserve' ? 5 : 3) === 0) this.updatePheromones();
 		this.renderer.render(this.scene, this.camera);
@@ -263,16 +372,44 @@ export class ColonyScene {
 	dispose(): void {
 		this.controls.dispose();
 		this.scene.traverse((object) => {
-			if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
-				object.geometry.dispose();
-				const materials = Array.isArray(object.material) ? object.material : [object.material];
-				for (const material of materials) {
-					if ('map' in material && material.map instanceof THREE.Texture) material.map.dispose();
-					material.dispose();
-				}
+			const renderable = object as THREE.Object3D & {
+				geometry?: THREE.BufferGeometry;
+				material?: THREE.Material | THREE.Material[];
+			};
+			renderable.geometry?.dispose();
+			const materials = renderable.material
+				? Array.isArray(renderable.material)
+					? renderable.material
+					: [renderable.material]
+				: [];
+			for (const material of materials) {
+				if ('map' in material && material.map instanceof THREE.Texture) material.map.dispose();
+				material.dispose();
 			}
 		});
 		this.renderer.dispose();
+	}
+
+	private syncFoodVisuals(): void {
+		for (const food of this.simulation.foods) {
+			this.foodGroups.get(food.id)?.position.set(food.x, 0.58, food.z);
+			this.foodLabels.get(food.id)?.position.set(food.x, 1.52, food.z);
+		}
+	}
+
+	private syncObstacleVisuals(): void {
+		const activeIds = new Set(this.simulation.obstacles.map((obstacle) => obstacle.id));
+		for (const [id, group] of this.obstacleGroups) {
+			if (activeIds.has(id)) continue;
+			this.scene.remove(group);
+			this.obstacleGroups.delete(id);
+		}
+		for (const obstacle of this.simulation.obstacles) {
+			if (this.obstacleGroups.has(obstacle.id)) continue;
+			const group = obstacleVisual(obstacle, this.preset === 'full');
+			this.obstacleGroups.set(obstacle.id, group);
+			this.scene.add(group);
+		}
 	}
 
 	private updateAntInstances(): void {
@@ -281,7 +418,7 @@ export class ColonyScene {
 			const part = mesh.userData.part as { offset: number; scale: number[] };
 			for (let index = 0; index < ants.length; index += 1) {
 				const ant = ants[index];
-				const bob = Math.sin(ant.phase) * 0.018;
+				const bob = this.antBob(ant);
 				scratch.position.set(
 					ant.x + Math.cos(ant.angle) * part.offset,
 					0.72 + bob,
@@ -295,20 +432,96 @@ export class ColonyScene {
 			mesh.count = ants.length;
 			mesh.instanceMatrix.needsUpdate = true;
 		}
+
+		const legBaseAngles = [0.92, Math.PI / 2, 2.22];
+		const legOffsets = [0.07, 0, -0.075];
+		for (const mesh of this.legMeshes) {
+			const { pair, side } = mesh.userData.leg as { pair: number; side: number };
+			for (let index = 0; index < ants.length; index += 1) {
+				const ant = ants[index];
+				const stillness = ant.action === 'pickup' || ant.action === 'unload' ? 0.18 : 1;
+				const sway = Math.sin(ant.phase + pair * Math.PI + (side > 0 ? Math.PI : 0)) * 0.2 * stillness;
+				const direction = ant.angle + side * legBaseAngles[pair] + sway;
+				const forwardOffset = legOffsets[pair];
+				const startX =
+					ant.x + Math.cos(ant.angle) * forwardOffset + Math.cos(ant.angle + side * Math.PI / 2) * 0.055;
+				const startZ =
+					ant.z + Math.sin(ant.angle) * forwardOffset + Math.sin(ant.angle + side * Math.PI / 2) * 0.055;
+				this.setAppendageMatrix(mesh, index, startX, startZ, 0.69 + this.antBob(ant), direction, 0.19);
+			}
+			mesh.count = ants.length;
+			mesh.instanceMatrix.needsUpdate = true;
+		}
+
+		for (const mesh of this.antennaMeshes) {
+			const side = mesh.userData.side as number;
+			for (let index = 0; index < ants.length; index += 1) {
+				const ant = ants[index];
+				const direction = ant.angle + side * (0.3 + Math.sin(ant.phase * 0.42 + side) * 0.08);
+				const startX = ant.x + Math.cos(ant.angle) * 0.19 + Math.cos(ant.angle + side * Math.PI / 2) * 0.025;
+				const startZ = ant.z + Math.sin(ant.angle) * 0.19 + Math.sin(ant.angle + side * Math.PI / 2) * 0.025;
+				this.setAppendageMatrix(mesh, index, startX, startZ, 0.735 + this.antBob(ant), direction, 0.17);
+			}
+			mesh.count = ants.length;
+			mesh.instanceMatrix.needsUpdate = true;
+		}
+
 		for (let index = 0; index < ants.length; index += 1) {
 			const ant = ants[index];
+			const cargo = this.cargoPose(ant);
 			scratch.position.set(
-				ant.x + Math.cos(ant.angle) * 0.25,
-				ant.hasFood ? 0.86 + Math.sin(ant.phase) * 0.018 : -20,
-				ant.z + Math.sin(ant.angle) * 0.25
+				ant.x + Math.cos(ant.angle) * cargo.offset,
+				cargo.y + this.antBob(ant),
+				ant.z + Math.sin(ant.angle) * cargo.offset
 			);
-			scratch.rotation.set(0, ant.angle, 0);
-			scratch.scale.setScalar(ant.hasFood ? 1 : 0.001);
+			scratch.rotation.set(ant.phase * 0.04, ant.angle, ant.phase * 0.06);
+			scratch.scale.setScalar(ant.hasFood ? 1 + ant.carryingValue * 0.06 : 0.001);
 			scratch.updateMatrix();
 			this.cargoMesh.setMatrixAt(index, scratch.matrix);
+			const food = this.simulation.foods.find((source) => source.id === ant.carryingFoodId);
+			scratchColor.set(food?.color ?? '#e6c842');
+			this.cargoMesh.setColorAt(index, scratchColor);
 		}
 		this.cargoMesh.count = ants.length;
 		this.cargoMesh.instanceMatrix.needsUpdate = true;
+		if (this.cargoMesh.instanceColor) this.cargoMesh.instanceColor.needsUpdate = true;
+	}
+
+	private setAppendageMatrix(
+		mesh: THREE.InstancedMesh,
+		index: number,
+		startX: number,
+		startZ: number,
+		y: number,
+		direction: number,
+		length: number
+	): void {
+		appendageDirection.set(Math.cos(direction), -0.08, Math.sin(direction)).normalize();
+		scratch.position.set(
+			startX + appendageDirection.x * length * 0.5,
+			y + appendageDirection.y * length * 0.5,
+			startZ + appendageDirection.z * length * 0.5
+		);
+		scratch.quaternion.setFromUnitVectors(yAxis, appendageDirection);
+		scratch.scale.set(1, 1, 1);
+		scratch.updateMatrix();
+		mesh.setMatrixAt(index, scratch.matrix);
+	}
+
+	private antBob(ant: AntAgent): number {
+		const actionLift =
+			ant.action === 'pickup' ? Math.sin(ant.actionProgress * Math.PI) * 0.035 : ant.action === 'unload' ? -0.015 : 0;
+		return Math.sin(ant.phase) * 0.018 + actionLift;
+	}
+
+	private cargoPose(ant: AntAgent): { offset: number; y: number } {
+		if (ant.action === 'pickup') {
+			return { offset: 0.3 - ant.actionProgress * 0.05, y: 0.66 + ant.actionProgress * 0.2 };
+		}
+		if (ant.action === 'unload') {
+			return { offset: 0.25 * (1 - ant.actionProgress), y: 0.86 - ant.actionProgress * 0.18 };
+		}
+		return { offset: 0.25, y: 0.86 };
 	}
 
 	private updatePheromones(): void {
@@ -321,12 +534,12 @@ export class ColonyScene {
 					[homeTrail[index], homeSignalColor],
 					[foodTrail[index], foodSignalColor]
 				] as const) {
-					if (value < 0.055) continue;
+					if (value < 0.008) continue;
 					const offset = point * 3;
 					this.pheromonePositions[offset] = -width / 2 + ((column + 0.5) / columns) * width;
-					this.pheromonePositions[offset + 1] = 0.64 + value * 0.035;
+					this.pheromonePositions[offset + 1] = 0.7 + value * 0.045;
 					this.pheromonePositions[offset + 2] = -depth / 2 + ((row + 0.5) / rows) * depth;
-					scratchColor.copy(grassColor).lerp(color, Math.min(1, 0.34 + value * 0.9));
+					scratchColor.copy(color).lerp(grassColor, Math.max(0, 0.18 - value * 0.16));
 					this.pheromoneColors[offset] = scratchColor.r;
 					this.pheromoneColors[offset + 1] = scratchColor.g;
 					this.pheromoneColors[offset + 2] = scratchColor.b;
