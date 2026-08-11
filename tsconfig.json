@@ -10,7 +10,16 @@
 		"sourceMap": true,
 		"strict": true,
 		"moduleResolution": "bundler"
-	}
+	},
+	"exclude": [
+		"node_modules/**",
+		"src/lib/entities/**",
+		"src/lib/stores/**",
+		"src/lib/utilities/**",
+		"src/lib/main.svelte.ts",
+		"src/lib/types.ts",
+		"src/routes/page copy.svelte"
+	]
 	// Path aliases are handled by https://kit.svelte.dev/docs/configuration#alias
 	// except $lib which is handled by https://kit.svelte.dev/docs/configuration#files
 	//
