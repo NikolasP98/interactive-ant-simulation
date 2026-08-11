@@ -1,7 +1,7 @@
 export type Temperament = 'curious' | 'adaptive' | 'disciplined';
 export type AntAction = 'forage' | 'pickup' | 'carry' | 'unload';
 export type AntDecision = 'search' | 'signal' | 'goal' | 'recover' | 'edge';
-export const SENSOR_OFFSETS = [-0.72, -0.32, 0, 0.32, 0.72] as const;
+export const SENSOR_OFFSETS = [-0.55, -0.26, 0, 0.26, 0.55] as const;
 
 export type ColonySettings = {
 	population: number;
@@ -56,6 +56,10 @@ export type AntAgent = {
 	memoryClock: number;
 	recentPositions: Array<{ x: number; z: number }>;
 	loopHits: number;
+	signalHeading: number;
+	outboundDistance: number;
+	returnDistance: number;
+	directTripDistance: number;
 };
 
 type TemperamentProfile = {
@@ -74,30 +78,30 @@ const TEMPERAMENTS: Record<Temperament, TemperamentProfile> = {
 	curious: {
 		wander: 1.48,
 		signalWeight: 0.76,
-		turnRate: 3.1,
+		turnRate: 2.45,
 		stride: 1.16,
-		sensorDistance: 0.68,
-		threshold: 0.052,
+		sensorDistance: 0.92,
+		threshold: 0.045,
 		patience: 1.05,
 		warningWeight: 0.88
 	},
 	adaptive: {
 		wander: 1,
 		signalWeight: 1,
-		turnRate: 2.75,
+		turnRate: 2.25,
 		stride: 1.08,
-		sensorDistance: 0.78,
-		threshold: 0.035,
+		sensorDistance: 1.02,
+		threshold: 0.03,
 		patience: 1.35,
 		warningWeight: 1.05
 	},
 	disciplined: {
 		wander: 0.54,
 		signalWeight: 1.38,
-		turnRate: 2.35,
-		stride: 1,
-		sensorDistance: 0.86,
-		threshold: 0.022,
+		turnRate: 2,
+		stride: 1.04,
+		sensorDistance: 1.12,
+		threshold: 0.019,
 		patience: 1.75,
 		warningWeight: 1.2
 	}
@@ -168,8 +172,6 @@ export class ColonySimulation {
 	private nextFoodTrail = new Float32Array(this.columns * this.rows);
 	private nextWarningTrail = new Float32Array(this.columns * this.rows);
 	private obstacleSerial = 0;
-	private focusClock = 0;
-	private focusIndex = 0;
 
 	constructor(seed = 'pinonite-ant-colony', settings?: Partial<ColonySettings>) {
 		this.random = mulberry32(hashSeed(seed));
@@ -188,10 +190,6 @@ export class ColonySimulation {
 		return this.foods.find((food) => food.movable) ?? this.foods[0];
 	}
 
-	get inspectableAnt(): AntAgent | null {
-		return this.ants[this.focusIndex] ?? this.ants[0] ?? null;
-	}
-
 	reset(): void {
 		this.ants = [];
 		this.homeTrail.fill(0);
@@ -205,8 +203,6 @@ export class ColonySimulation {
 		this.harvestValue = 0;
 		this.elapsed = 0;
 		this.fieldClock = 0;
-		this.focusClock = 0;
-		this.focusIndex = 0;
 		this.seedNest();
 		this.resizePopulation(this.settings.population);
 	}
@@ -300,28 +296,6 @@ export class ColonySimulation {
 		}
 
 		for (const ant of this.ants) this.updateAnt(ant, dt);
-		this.updateInspectableAnt(dt);
-	}
-
-	private updateInspectableAnt(dt: number): void {
-		this.focusClock -= dt;
-		if (this.focusClock > 0 || this.ants.length === 0) return;
-		this.focusClock = 1.4;
-		let bestIndex = 0;
-		let bestScore = -Infinity;
-		for (let index = 0; index < this.ants.length; index += 1) {
-			const ant = this.ants[index];
-			const distance = Math.hypot(ant.x - this.nest.x, ant.z - this.nest.z);
-			const score =
-				ant.signalConfidence * 5 +
-				Math.min(4, distance) * 0.08 +
-				(ant.decision === 'recover' || ant.decision === 'edge' ? 0.28 : 0);
-			if (score > bestScore) {
-				bestScore = score;
-				bestIndex = index;
-			}
-		}
-		this.focusIndex = bestIndex;
 	}
 
 	private createAnt(): AntAgent {
@@ -353,7 +327,11 @@ export class ColonySimulation {
 			recoveryClock: 0,
 			memoryClock: this.random() * 0.4,
 			recentPositions: [],
-			loopHits: 0
+			loopHits: 0,
+			signalHeading: angle,
+			outboundDistance: 0,
+			returnDistance: 0,
+			directTripDistance: 0
 		};
 	}
 
@@ -393,12 +371,14 @@ export class ColonySimulation {
 			if (sensed.bestSignal < Math.max(0.016, ant.signalPeak * 0.42)) ant.declineClock += dt;
 			else ant.declineClock = Math.max(0, ant.declineClock - dt * 1.6);
 
-			const timedOut = ant.signalFollowClock > 9 + profile.patience * 2.2;
+			const timedOut = !ant.hasFood && ant.signalFollowClock > 12 + profile.patience * 2.4;
 			if (ant.declineClock > profile.patience || timedOut || loopDetected) {
 				this.enterRecovery(ant, loopDetected ? 0.58 : 0.72);
 				desired = ant.angle;
 			} else {
-				desired = sensed.direction;
+				const headingBlend = 1 - Math.exp(-dt * (ant.signalConfidence > 0.58 ? 4.4 : 2.8));
+				ant.signalHeading += shortestAngle(ant.signalHeading, sensed.direction) * headingBlend;
+				desired = ant.signalHeading;
 				ant.decision = 'signal';
 			}
 		} else {
@@ -428,6 +408,8 @@ export class ColonySimulation {
 		);
 
 		const stride = profile.stride * dt;
+		const previousX = ant.x;
+		const previousZ = ant.z;
 		let nextX = ant.x + Math.cos(ant.angle) * stride;
 		let nextZ = ant.z + Math.sin(ant.angle) * stride;
 		let contact = false;
@@ -454,6 +436,9 @@ export class ColonySimulation {
 		}
 		ant.x = nextX;
 		ant.z = nextZ;
+		const distanceMoved = Math.hypot(ant.x - previousX, ant.z - previousZ);
+		if (ant.hasFood) ant.returnDistance += distanceMoved;
+		else ant.outboundDistance += distanceMoved;
 		if (contact) {
 			this.deposit(this.warningTrail, ant.x, ant.z, 0.48);
 			ant.recoveryClock = Math.max(ant.recoveryClock, 0.72);
@@ -463,7 +448,9 @@ export class ColonySimulation {
 
 		ant.trailClock -= dt;
 		if (ant.trailClock <= 0) {
-			const amount = ant.hasFood ? 0.16 + ant.carryingValue * 0.055 : 0.13;
+			const amount = ant.hasFood
+				? (0.16 + ant.carryingValue * 0.055) * (0.38 + this.returnEfficiency(ant) * 0.92)
+				: 0.13 * (0.42 + this.outboundEfficiency(ant) * 0.78);
 			this.deposit(ant.hasFood ? this.foodTrail : this.homeTrail, ant.x, ant.z, amount);
 			ant.trailClock = 0.12 + this.random() * 0.055;
 		}
@@ -491,12 +478,14 @@ export class ColonySimulation {
 			const signal = this.sampleField(field, sampleX, sampleZ);
 			const warning = this.sampleField(this.warningTrail, sampleX, sampleZ);
 			const edgeRisk = this.edgeRisk(sampleX, sampleZ);
-			const forwardBias = 1 - Math.abs(offset) * 0.11;
+			const forwardBias = 1 - Math.abs(offset) * 0.18;
+			const explorationNoise =
+				this.random() * 0.01 * profile.wander * (1 - Math.min(0.9, signal * 2.8));
 			const score =
 				signal * forwardBias * profile.signalWeight -
 				warning * profile.warningWeight -
 				edgeRisk * 0.42 +
-				this.random() * 0.014 * profile.wander;
+				explorationNoise;
 			ant.sensorReadings[index] = signal;
 			ant.sensorWarnings[index] = warning;
 			ant.sensorScores[index] = score;
@@ -534,6 +523,7 @@ export class ColonySimulation {
 	private enterRecovery(ant: AntAgent, turn: number): void {
 		this.deposit(this.warningTrail, ant.x, ant.z, 0.55);
 		ant.angle += (this.random() < 0.5 ? -1 : 1) * Math.PI * turn;
+		ant.signalHeading = ant.angle;
 		ant.recoveryClock = 1.15 + this.random() * 0.8;
 		ant.decision = 'recover';
 		this.resetSignalCommitment(ant);
@@ -545,6 +535,23 @@ export class ColonySimulation {
 		ant.signalPeak = 0;
 		ant.signalFollowClock = 0;
 		ant.declineClock = 0;
+		ant.signalHeading = ant.angle;
+	}
+
+	private outboundEfficiency(ant: AntAgent): number {
+		const directDistance = Math.hypot(ant.x - this.nest.x, ant.z - this.nest.z);
+		if (directDistance < 0.2) return 1;
+		return Math.max(0.28, Math.min(1, directDistance / Math.max(directDistance, ant.outboundDistance)));
+	}
+
+	private returnEfficiency(ant: AntAgent): number {
+		if (ant.directTripDistance <= 0) return 1;
+		const remaining = Math.hypot(ant.x - this.nest.x, ant.z - this.nest.z);
+		const projectedRoute = ant.returnDistance + remaining;
+		return Math.max(
+			0.28,
+			Math.min(1, ant.directTripDistance / Math.max(ant.directTripDistance, projectedRoute))
+		);
 	}
 
 	private steerAwayFromEdges(
@@ -604,6 +611,9 @@ export class ColonySimulation {
 		ant.actionDuration = 0.42;
 		ant.actionClock = ant.actionDuration;
 		ant.actionProgress = 0;
+		ant.directTripDistance = Math.hypot(food.x - this.nest.x, food.z - this.nest.z);
+		ant.returnDistance = 0;
+		this.resetSignalCommitment(ant);
 	}
 
 	private startUnload(ant: AntAgent): void {
@@ -618,6 +628,7 @@ export class ColonySimulation {
 		if (ant.action === 'pickup') {
 			ant.action = 'carry';
 			ant.angle += Math.PI;
+			ant.signalHeading = ant.angle;
 			return;
 		}
 		if (ant.action === 'unload') {
@@ -628,6 +639,10 @@ export class ColonySimulation {
 			ant.carryingValue = 0;
 			ant.action = 'forage';
 			ant.angle += Math.PI;
+			ant.signalHeading = ant.angle;
+			ant.outboundDistance = 0;
+			ant.returnDistance = 0;
+			ant.directTripDistance = 0;
 		}
 	}
 
@@ -697,7 +712,21 @@ export class ColonySimulation {
 	}
 
 	private sampleField(field: Float32Array, x: number, z: number): number {
-		return field[this.indexFor(x, z)] ?? 0;
+		const columnPosition = ((x + this.width / 2) / this.width) * this.columns - 0.5;
+		const rowPosition = ((z + this.depth / 2) / this.depth) * this.rows - 0.5;
+		const column0 = Math.max(0, Math.min(this.columns - 1, Math.floor(columnPosition)));
+		const row0 = Math.max(0, Math.min(this.rows - 1, Math.floor(rowPosition)));
+		const column1 = Math.min(this.columns - 1, column0 + 1);
+		const row1 = Math.min(this.rows - 1, row0 + 1);
+		const columnMix = Math.max(0, Math.min(1, columnPosition - column0));
+		const rowMix = Math.max(0, Math.min(1, rowPosition - row0));
+		const top =
+			(field[row0 * this.columns + column0] ?? 0) * (1 - columnMix) +
+			(field[row0 * this.columns + column1] ?? 0) * columnMix;
+		const bottom =
+			(field[row1 * this.columns + column0] ?? 0) * (1 - columnMix) +
+			(field[row1 * this.columns + column1] ?? 0) * columnMix;
+		return top * (1 - rowMix) + bottom * rowMix;
 	}
 
 	private deposit(field: Float32Array, x: number, z: number, amount: number): void {

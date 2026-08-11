@@ -1,7 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ColonyScene, type ColonyView, type ResourcePreset } from '$lib/colonyScene';
-	import { ColonySimulation, SENSOR_OFFSETS, type AntDecision, type Temperament } from '$lib/simulation';
+	import {
+		ColonyScene,
+		type ColonyView,
+		type ResourcePreset,
+		type VisionStatus
+	} from '$lib/colonyScene';
+	import {
+		ColonySimulation,
+		SENSOR_OFFSETS,
+		type AntAgent,
+		type Temperament
+	} from '$lib/simulation';
 	import '../app.css';
 
 	const availableViews: ColonyView[] = ['habitat', 'signals', 'map'];
@@ -25,11 +35,36 @@
 	let harvest = $state(0);
 	let carrying = $state(0);
 	let obstacleCount = $state(0);
-	let focusDecision = $state<AntDecision>('search');
-	let focusConfidence = $state(0);
+	let visionFilters = $state<Record<VisionStatus, boolean>>({
+		search: true,
+		signal: true,
+		return: true,
+		recover: true
+	});
+	let selectedAntIndex = $state<number | null>(null);
+	let selectedAnt = $state<AntAgent | null>(null);
 	let pointerStart = { x: 0, y: 0 };
 	let simulation: ColonySimulation | null = null;
 	let colonyScene: ColonyScene | null = null;
+
+	const visionStatuses: VisionStatus[] = ['search', 'signal', 'return', 'recover'];
+	const statusForAnt = (ant: AntAgent): VisionStatus => {
+		if (ant.hasFood) return 'return';
+		if (ant.decision === 'recover' || ant.decision === 'edge') return 'recover';
+		if (ant.decision === 'signal' || ant.decision === 'goal') return 'signal';
+		return 'search';
+	};
+	const enabledVisionStatuses = () => visionStatuses.filter((status) => visionFilters[status]);
+	const toggleVisionStatus = (status: VisionStatus) => {
+		visionFilters[status] = !visionFilters[status];
+		colonyScene?.setVisionStatuses(enabledVisionStatuses());
+		persistSettings();
+	};
+	const clearSelection = () => {
+		selectedAntIndex = null;
+		selectedAnt = null;
+		colonyScene?.setSelectedAnt(null);
+	};
 
 	const resolvePreset = (requested: string | null): ResourcePreset => {
 		if (requested === 'conserve' || requested === 'balanced' || requested === 'full') return requested;
@@ -56,6 +91,7 @@
 				temperament,
 				showSignals,
 				showVision,
+				visionFilters,
 				food: simulation.food
 			})
 		);
@@ -69,6 +105,7 @@
 	const resetColony = () => {
 		simulation?.reset();
 		obstacleCount = 0;
+		clearSelection();
 		persistSettings();
 	};
 
@@ -79,20 +116,56 @@
 		obstacleCount = simulation.obstacles.length;
 	};
 
-	const clickGround = (event: PointerEvent) => {
+	const mapPoint = (event: PointerEvent): { x: number; z: number } | null => {
+		if (!simulation || !mapCanvas) return null;
+		const rect = mapCanvas.getBoundingClientRect();
+		const padding = Math.min(rect.width, rect.height) * 0.055;
+		return {
+			x: ((event.clientX - rect.left - padding) / (rect.width - padding * 2) - 0.5) * simulation.width,
+			z: ((event.clientY - rect.top - padding) / (rect.height - padding * 2) - 0.5) * simulation.depth
+		};
+	};
+
+	const selectPausedAnt = (event: PointerEvent): boolean => {
+		if (!simulation || playing) return false;
+		let index: number | null = null;
+		if (view === 'map') {
+			const point = mapPoint(event);
+			if (point) {
+				let nearestDistance = 0.65;
+				for (let antIndex = 0; antIndex < simulation.ants.length; antIndex += 1) {
+					const ant = simulation.ants[antIndex];
+					const distance = Math.hypot(ant.x - point.x, ant.z - point.z);
+					if (distance >= nearestDistance) continue;
+					nearestDistance = distance;
+					index = antIndex;
+				}
+			}
+		} else index = colonyScene?.antAt(event.clientX, event.clientY) ?? null;
+		if (index === null) return false;
+		selectedAntIndex = index;
+		selectedAnt = simulation.ants[index];
+		colonyScene?.setSelectedAnt(index);
+		return true;
+	};
+
+	const handleStageClick = (event: PointerEvent) => {
 		if (!simulation) return;
 		if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
+		if (selectPausedAnt(event)) return;
 		if (view === 'map' && mapCanvas) {
-			const rect = mapCanvas.getBoundingClientRect();
-			const padding = Math.min(rect.width, rect.height) * 0.055;
-			const x = ((event.clientX - rect.left - padding) / (rect.width - padding * 2) - 0.5) * simulation.width;
-			const z = ((event.clientY - rect.top - padding) / (rect.height - padding * 2) - 0.5) * simulation.depth;
-			simulation.moveFood(x, z);
+			const point = mapPoint(event);
+			if (point) simulation.moveFood(point.x, point.z);
 		} else {
 			const point = colonyScene?.groundPoint(event.clientX, event.clientY);
 			if (point) simulation.moveFood(point.x, point.z);
 		}
 		persistSettings();
+	};
+
+	const togglePlaying = () => {
+		playing = !playing;
+		if (playing) clearSelection();
 	};
 
 	const drawMap = (context: CanvasRenderingContext2D, width: number, height: number) => {
@@ -149,10 +222,18 @@
 		}
 
 		if (showVision) {
-			const ant = simulation.inspectableAnt;
-			if (ant) {
+			const sensorDistance = temperament === 'curious' ? 0.92 : temperament === 'disciplined' ? 1.12 : 1.02;
+			const statusColors: Record<VisionStatus, string> = {
+				search: '#f0c84b',
+				signal: '#b7d928',
+				return: '#2ba9eb',
+				recover: '#d34b83'
+			};
+			for (let antIndex = 0; antIndex < simulation.ants.length; antIndex += 1) {
+				const ant = simulation.ants[antIndex];
+				const status = statusForAnt(ant);
+				if (!visionFilters[status]) continue;
 				const origin = toScreen(ant.x, ant.z);
-				const sensorDistance = temperament === 'curious' ? 0.68 : temperament === 'disciplined' ? 0.86 : 0.78;
 				const endpoints = SENSOR_OFFSETS.map((offset) =>
 					toScreen(
 						ant.x + Math.cos(ant.angle + offset) * sensorDistance,
@@ -160,7 +241,8 @@
 					)
 				);
 				context.save();
-				context.fillStyle = ant.sensorKind === 'home' ? 'rgba(43,169,235,.12)' : 'rgba(255,104,72,.12)';
+				context.globalAlpha = 0.08;
+				context.fillStyle = statusColors[status];
 				context.beginPath();
 				context.moveTo(origin.x, origin.y);
 				context.lineTo(endpoints[0].x, endpoints[0].y);
@@ -170,17 +252,17 @@
 				for (let index = 0; index < endpoints.length; index += 1) {
 					const warningWins = ant.sensorWarnings[index] > ant.sensorReadings[index] * 0.7;
 					context.strokeStyle = warningWins ? '#d34b83' : ant.sensorKind === 'home' ? '#2ba9eb' : '#ff6848';
-					context.globalAlpha = 0.35 + Math.max(ant.sensorReadings[index], ant.sensorWarnings[index]) * 0.65;
+					context.globalAlpha = 0.18 + Math.max(ant.sensorReadings[index], ant.sensorWarnings[index]) * 0.36;
 					context.beginPath();
 					context.moveTo(origin.x, origin.y);
 					context.lineTo(endpoints[index].x, endpoints[index].y);
 					context.stroke();
 				}
 				context.globalAlpha = 1;
-				context.strokeStyle = '#b7d928';
-				context.lineWidth = 2;
+				context.strokeStyle = antIndex === selectedAntIndex ? '#ffffff' : statusColors[status];
+				context.lineWidth = antIndex === selectedAntIndex ? 3 : 1.35;
 				context.beginPath();
-				context.arc(origin.x, origin.y, 8, 0, Math.PI * 2);
+				context.arc(origin.x, origin.y, antIndex === selectedAntIndex ? 10 : 7, 0, Math.PI * 2);
 				context.stroke();
 				context.restore();
 			}
@@ -311,6 +393,11 @@
 					: temperament;
 				showSignals = settings.showSignals ?? showSignals;
 				showVision = settings.showVision ?? showVision;
+				if (settings.visionFilters) {
+					for (const status of visionStatuses) {
+						visionFilters[status] = settings.visionFilters[status] ?? visionFilters[status];
+					}
+				}
 			} catch {
 				// Ignore older or incomplete settings snapshots.
 			}
@@ -331,6 +418,7 @@
 			}
 		}
 		colonyScene = new ColonyScene(threeCanvas, simulation, resourcePreset);
+		colonyScene.setVisionStatuses(enabledVisionStatuses());
 		if (view !== 'map') colonyScene.setView(view);
 
 		const resize = () => {
@@ -370,8 +458,7 @@
 				harvest = simulation.harvestValue;
 				carrying = simulation.ants.filter((ant) => ant.hasFood).length;
 				obstacleCount = simulation.obstacles.length;
-				focusDecision = simulation.inspectableAnt?.decision ?? 'search';
-				focusConfidence = simulation.inspectableAnt?.signalConfidence ?? 0;
+				if (selectedAntIndex !== null) selectedAnt = simulation.ants[selectedAntIndex] ?? null;
 				readoutClock = 0;
 			}
 			raf = requestAnimationFrame(frame);
@@ -425,14 +512,14 @@
 			class:hidden={view === 'map'}
 			bind:this={threeCanvas}
 			onpointerdown={(event) => (pointerStart = { x: event.clientX, y: event.clientY })}
-			onpointerup={clickGround}
+			onpointerup={handleStageClick}
 			aria-label="Orbitable isometric ant habitat. Drag to orbit and click the ground to move food."
 		></canvas>
 		<canvas
 			class:hidden={view !== 'map'}
 			bind:this={mapCanvas}
 			onpointerdown={(event) => (pointerStart = { x: event.clientX, y: event.clientY })}
-			onpointerup={clickGround}
+			onpointerup={handleStageClick}
 			aria-label="Top-down ant simulation. Click the field to move food."
 		></canvas>
 
@@ -445,7 +532,7 @@
 						? 'The ground keeps the colony’s memory'
 						: 'The original idea, kept in view'}
 			</strong>
-			<small>{temperament.toUpperCase()} · {obstacleCount} BLOCKS · SCOUT {focusDecision.toUpperCase()} {Math.round(focusConfidence * 100)}%</small>
+			<small>{temperament.toUpperCase()} · {obstacleCount} BLOCKS · VISION {enabledVisionStatuses().length}/4</small>
 		</div>
 		<div class="readout" aria-live="polite">
 			<span><b>{String(delivered).padStart(2, '0')}</b> DELIVERIES</span>
@@ -453,15 +540,57 @@
 			<span><b>{String(carrying).padStart(2, '0')}</b> RETURNING</span>
 		</div>
 		<div class="instruction">
-			{view === 'map' ? 'CLICK FIELD TO MOVE RICH FOOD' : 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
+			{!playing
+				? 'CLICK AN ANT FOR DETAILS · EMPTY GROUND MOVES FOOD'
+				: view === 'map'
+					? 'CLICK FIELD TO MOVE RICH FOOD'
+					: 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
 		</div>
 		{#if view === 'signals' || showVision}
 			<div class="signal-key">
-				<span class="home-dot"></span> HOME
-				<span class="food-dot"></span> FOOD
-				<span class="warning-dot"></span> DOUBT
-				{#if showVision}<span class="vision-dot"></span> FOCUS SCOUT{/if}
+				<div class="field-legend">
+					<span class="home-dot"></span> HOME
+					<span class="food-dot"></span> FOOD
+					<span class="warning-dot"></span> DOUBT
+				</div>
+				{#if showVision}
+					<div class="vision-filters" aria-label="Ant vision filters">
+						{#each visionStatuses as status}
+							<button
+								type="button"
+								class:active={visionFilters[status]}
+								class={`vision-${status}`}
+								onclick={() => toggleVisionStatus(status)}
+								aria-pressed={visionFilters[status]}
+							>
+								<span></span>{status}
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
+		{/if}
+		{#if !playing && selectedAnt && selectedAntIndex !== null}
+			<aside class="ant-inspector" aria-live="polite">
+				<header>
+					<div><span>UNIT</span><strong>ANT {String(selectedAntIndex + 1).padStart(2, '0')}</strong></div>
+					<button type="button" onclick={clearSelection} aria-label="Close ant details">×</button>
+				</header>
+				<dl>
+					<div><dt>STATUS</dt><dd>{statusForAnt(selectedAnt).toUpperCase()}</dd></div>
+					<div><dt>DECISION</dt><dd>{selectedAnt.decision.toUpperCase()}</dd></div>
+					<div><dt>READS</dt><dd>{selectedAnt.sensorKind.toUpperCase()} FIELD</dd></div>
+					<div><dt>CONFIDENCE</dt><dd>{Math.round(selectedAnt.signalConfidence * 100)}%</dd></div>
+					<div><dt>CARGO</dt><dd>{selectedAnt.hasFood ? `${selectedAnt.carryingValue}× VALUE` : 'EMPTY'}</dd></div>
+					<div><dt>ROUTE</dt><dd>{(selectedAnt.hasFood ? selectedAnt.returnDistance : selectedAnt.outboundDistance).toFixed(1)} M</dd></div>
+				</dl>
+				<div class="sensor-ledger" aria-label="Five sensor readings from left to right">
+					{#each selectedAnt.sensorReadings as reading, index}
+						<span style={`--reading:${Math.max(0.05, reading)};--warning:${selectedAnt.sensorWarnings[index]}`}></span>
+					{/each}
+				</div>
+				<small>FIVE SAMPLES · LEFT → RIGHT</small>
+			</aside>
 		{/if}
 	</section>
 
@@ -510,8 +639,8 @@
 		{:else}
 			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>SIGNALS {showSignals ? 'ON' : 'OFF'}</button>
 		{/if}
-		<button class:active={showVision} type="button" onclick={() => { showVision = !showVision; persistSettings(); }}>SCOUT VISION {showVision ? 'ON' : 'OFF'}</button>
-		<button class:active={!playing} type="button" onclick={() => (playing = !playing)}>{playing ? 'PAUSE' : 'RESUME'} COLONY</button>
+		<button class:active={showVision} type="button" onclick={() => { showVision = !showVision; persistSettings(); }}>ANT VISION {showVision ? 'ON' : 'OFF'}</button>
+		<button class:active={!playing} type="button" onclick={togglePlaying}>{playing ? 'PAUSE' : 'RESUME'} COLONY</button>
 		<button type="button" onclick={resetColony}>NEW COLONY ↻</button>
 	</section>
 

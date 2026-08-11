@@ -4,6 +4,9 @@ import { SENSOR_OFFSETS, type AntAgent, type ColonySimulation, type FoodSource, 
 
 export type ColonyView = 'habitat' | 'signals' | 'map';
 export type ResourcePreset = 'conserve' | 'balanced' | 'full';
+export type VisionStatus = 'search' | 'signal' | 'return' | 'recover';
+
+const maximumAnts = 120;
 
 const scratch = new THREE.Object3D();
 const scratchColor = new THREE.Color();
@@ -14,6 +17,12 @@ const homeSignalColor = new THREE.Color('#2ba9eb');
 const foodSignalColor = new THREE.Color('#ff6848');
 const warningSignalColor = new THREE.Color('#d34b83');
 const neutralSignalColor = new THREE.Color('#8f9588');
+const visionStatusColors: Record<VisionStatus, THREE.Color> = {
+	search: new THREE.Color('#f0c84b'),
+	signal: new THREE.Color('#b7d928'),
+	return: new THREE.Color('#2ba9eb'),
+	recover: new THREE.Color('#d34b83')
+};
 
 function labelSprite(text: string, accent: string, scale = 1): THREE.Sprite {
 	const canvas = document.createElement('canvas');
@@ -137,12 +146,15 @@ export class ColonyScene {
 	private cargoMesh: THREE.InstancedMesh;
 	private pheromones: THREE.InstancedMesh;
 	private pheromoneSpotScale = 1;
-	private visionCone: THREE.Mesh;
+	private visionCones: THREE.InstancedMesh;
 	private visionRays: THREE.LineSegments;
-	private visionRayPositions = new Float32Array(SENSOR_OFFSETS.length * 6);
-	private visionRayColors = new Float32Array(SENSOR_OFFSETS.length * 6);
-	private visionRing: THREE.Mesh;
+	private visionRayPositions = new Float32Array(maximumAnts * SENSOR_OFFSETS.length * 6);
+	private visionRayColors = new Float32Array(maximumAnts * SENSOR_OFFSETS.length * 6);
+	private visionRings: THREE.InstancedMesh;
+	private selectionRing: THREE.Mesh;
 	private visionVisible = true;
+	private visionStatuses = new Set<VisionStatus>(['search', 'signal', 'return', 'recover']);
+	private selectedAntIndex: number | null = null;
 	private foodGroups = new Map<string, THREE.Group>();
 	private foodLabels = new Map<string, THREE.Sprite>();
 	private obstacleGroups = new Map<string, THREE.Group>();
@@ -304,39 +316,55 @@ export class ColonyScene {
 				3
 			)
 		);
-		this.visionCone = new THREE.Mesh(
+		this.visionCones = new THREE.InstancedMesh(
 			coneGeometry,
 			new THREE.MeshBasicMaterial({
-				color: foodSignalColor,
+				color: '#ffffff',
 				transparent: true,
-				opacity: 0.11,
+				opacity: 0.055,
 				depthWrite: false,
 				side: THREE.DoubleSide
-			})
+			}),
+			maximumAnts
 		);
-		this.visionCone.frustumCulled = false;
-		this.visionCone.renderOrder = 3;
-		this.scene.add(this.visionCone);
+		this.visionCones.count = 0;
+		this.visionCones.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+		this.visionCones.frustumCulled = false;
+		this.visionCones.renderOrder = 3;
+		this.scene.add(this.visionCones);
 
 		const visionRayGeometry = new THREE.BufferGeometry();
 		visionRayGeometry.setAttribute('position', new THREE.BufferAttribute(this.visionRayPositions, 3));
 		visionRayGeometry.setAttribute('color', new THREE.BufferAttribute(this.visionRayColors, 3));
 		this.visionRays = new THREE.LineSegments(
 			visionRayGeometry,
-			new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.94, depthTest: false })
+			new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.46, depthTest: false })
 		);
+		visionRayGeometry.setDrawRange(0, 0);
 		this.visionRays.frustumCulled = false;
 		this.visionRays.renderOrder = 5;
 		this.scene.add(this.visionRays);
 
-		this.visionRing = new THREE.Mesh(
+		this.visionRings = new THREE.InstancedMesh(
 			new THREE.RingGeometry(0.22, 0.28, 24),
-			new THREE.MeshBasicMaterial({ color: '#d8ed57', transparent: true, opacity: 0.92, side: THREE.DoubleSide })
+			new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6, side: THREE.DoubleSide }),
+			maximumAnts
 		);
-		this.visionRing.rotation.x = -Math.PI / 2;
-		this.visionRing.frustumCulled = false;
-		this.visionRing.renderOrder = 5;
-		this.scene.add(this.visionRing);
+		this.visionRings.count = 0;
+		this.visionRings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+		this.visionRings.frustumCulled = false;
+		this.visionRings.renderOrder = 5;
+		this.scene.add(this.visionRings);
+
+		this.selectionRing = new THREE.Mesh(
+			new THREE.RingGeometry(0.34, 0.43, 28),
+			new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.95, side: THREE.DoubleSide })
+		);
+		this.selectionRing.rotation.x = -Math.PI / 2;
+		this.selectionRing.frustumCulled = false;
+		this.selectionRing.renderOrder = 7;
+		this.selectionRing.visible = false;
+		this.scene.add(this.selectionRing);
 
 		this.nestLabel.position.set(simulation.nest.x, 1.55, simulation.nest.z);
 		this.scene.add(this.nestLabel);
@@ -374,9 +402,34 @@ export class ColonyScene {
 
 	setVisionVisible(visible: boolean): void {
 		this.visionVisible = visible;
-		this.visionCone.visible = visible;
+		this.visionCones.visible = visible;
 		this.visionRays.visible = visible;
-		this.visionRing.visible = visible;
+		this.visionRings.visible = visible;
+		this.selectionRing.visible = visible && this.selectedAntIndex !== null;
+	}
+
+	setVisionStatuses(statuses: VisionStatus[]): void {
+		this.visionStatuses = new Set(statuses);
+	}
+
+	setSelectedAnt(index: number | null): void {
+		this.selectedAntIndex = index;
+		this.selectionRing.visible = this.visionVisible && index !== null;
+	}
+
+	antAt(clientX: number, clientY: number, radius = 0.62): number | null {
+		const point = this.groundPoint(clientX, clientY);
+		if (!point) return null;
+		let nearestIndex: number | null = null;
+		let nearestDistance = radius;
+		for (let index = 0; index < this.simulation.ants.length; index += 1) {
+			const ant = this.simulation.ants[index];
+			const distance = Math.hypot(ant.x - point.x, ant.z - point.z);
+			if (distance >= nearestDistance) continue;
+			nearestDistance = distance;
+			nearestIndex = index;
+		}
+		return nearestIndex;
 	}
 
 	resize(width: number, height: number): void {
@@ -573,43 +626,89 @@ export class ColonyScene {
 
 	private updateVision(): void {
 		if (!this.visionVisible) return;
-		const ant = this.simulation.inspectableAnt;
-		if (!ant) return;
-		const sensorDistance =
-			this.simulation.settings.temperament === 'curious'
-				? 0.68
-				: this.simulation.settings.temperament === 'disciplined'
-					? 0.86
-					: 0.78;
-		this.visionCone.position.set(ant.x, 0.735, ant.z);
-		this.visionCone.rotation.set(0, -ant.angle, 0);
-		this.visionCone.scale.setScalar(sensorDistance);
-		(this.visionCone.material as THREE.MeshBasicMaterial).color.copy(
-			ant.sensorKind === 'home' ? homeSignalColor : foodSignalColor
-		);
-		this.visionRing.position.set(ant.x, 0.746, ant.z);
+		const sensorDistance = this.sensorDistance();
+		let visibleAnts = 0;
+		let visibleRays = 0;
+		for (let antIndex = 0; antIndex < this.simulation.ants.length; antIndex += 1) {
+			const ant = this.simulation.ants[antIndex];
+			const status = this.visionStatus(ant);
+			if (!this.visionStatuses.has(status)) continue;
 
-		for (let index = 0; index < SENSOR_OFFSETS.length; index += 1) {
-			const direction = ant.angle + SENSOR_OFFSETS[index];
-			const offset = index * 6;
-			this.visionRayPositions[offset] = ant.x;
-			this.visionRayPositions[offset + 1] = 0.765;
-			this.visionRayPositions[offset + 2] = ant.z;
-			this.visionRayPositions[offset + 3] = ant.x + Math.cos(direction) * sensorDistance;
-			this.visionRayPositions[offset + 4] = 0.765;
-			this.visionRayPositions[offset + 5] = ant.z + Math.sin(direction) * sensorDistance;
-			const warning = ant.sensorWarnings[index];
-			const signal = ant.sensorReadings[index];
-			const base = warning > signal * 0.7 ? warningSignalColor : ant.sensorKind === 'home' ? homeSignalColor : foodSignalColor;
-			scratchColor.copy(base).lerp(neutralSignalColor, Math.max(0, 0.72 - Math.max(signal, warning) * 1.5));
-			for (const vertexOffset of [offset, offset + 3]) {
-				this.visionRayColors[vertexOffset] = scratchColor.r;
-				this.visionRayColors[vertexOffset + 1] = scratchColor.g;
-				this.visionRayColors[vertexOffset + 2] = scratchColor.b;
+			scratch.position.set(ant.x, 0.735, ant.z);
+			scratch.rotation.set(0, -ant.angle, 0);
+			scratch.scale.setScalar(sensorDistance);
+			scratch.updateMatrix();
+			this.visionCones.setMatrixAt(visibleAnts, scratch.matrix);
+			this.visionCones.setColorAt(visibleAnts, visionStatusColors[status]);
+
+			scratch.position.set(ant.x, 0.746, ant.z);
+			scratch.rotation.set(-Math.PI / 2, 0, 0);
+			scratch.scale.setScalar(1);
+			scratch.updateMatrix();
+			this.visionRings.setMatrixAt(visibleAnts, scratch.matrix);
+			this.visionRings.setColorAt(visibleAnts, visionStatusColors[status]);
+
+			for (let sensorIndex = 0; sensorIndex < SENSOR_OFFSETS.length; sensorIndex += 1) {
+				const direction = ant.angle + SENSOR_OFFSETS[sensorIndex];
+				const offset = visibleRays * 6;
+				this.visionRayPositions[offset] = ant.x;
+				this.visionRayPositions[offset + 1] = 0.765;
+				this.visionRayPositions[offset + 2] = ant.z;
+				this.visionRayPositions[offset + 3] = ant.x + Math.cos(direction) * sensorDistance;
+				this.visionRayPositions[offset + 4] = 0.765;
+				this.visionRayPositions[offset + 5] = ant.z + Math.sin(direction) * sensorDistance;
+				const warning = ant.sensorWarnings[sensorIndex];
+				const signal = ant.sensorReadings[sensorIndex];
+				const base =
+					warning > signal * 0.7
+						? warningSignalColor
+						: ant.sensorKind === 'home'
+							? homeSignalColor
+							: foodSignalColor;
+				scratchColor
+					.copy(base)
+					.lerp(neutralSignalColor, Math.max(0, 0.72 - Math.max(signal, warning) * 1.5));
+				for (const vertexOffset of [offset, offset + 3]) {
+					this.visionRayColors[vertexOffset] = scratchColor.r;
+					this.visionRayColors[vertexOffset + 1] = scratchColor.g;
+					this.visionRayColors[vertexOffset + 2] = scratchColor.b;
+				}
+				visibleRays += 1;
 			}
+			visibleAnts += 1;
 		}
+
+		this.visionCones.count = visibleAnts;
+		this.visionCones.instanceMatrix.needsUpdate = true;
+		if (this.visionCones.instanceColor) this.visionCones.instanceColor.needsUpdate = true;
+		this.visionRings.count = visibleAnts;
+		this.visionRings.instanceMatrix.needsUpdate = true;
+		if (this.visionRings.instanceColor) this.visionRings.instanceColor.needsUpdate = true;
+		this.visionRays.geometry.setDrawRange(0, visibleRays * 2);
 		(this.visionRays.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
 		(this.visionRays.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+
+		const selectedAnt =
+			this.selectedAntIndex === null ? null : this.simulation.ants[this.selectedAntIndex] ?? null;
+		if (selectedAnt) {
+			this.selectionRing.visible = true;
+			this.selectionRing.position.set(selectedAnt.x, 0.756, selectedAnt.z);
+		} else this.selectionRing.visible = false;
+	}
+
+	private visionStatus(ant: AntAgent): VisionStatus {
+		if (ant.hasFood) return 'return';
+		if (ant.decision === 'recover' || ant.decision === 'edge') return 'recover';
+		if (ant.decision === 'signal' || ant.decision === 'goal') return 'signal';
+		return 'search';
+	}
+
+	private sensorDistance(): number {
+		return this.simulation.settings.temperament === 'curious'
+			? 0.92
+			: this.simulation.settings.temperament === 'disciplined'
+				? 1.12
+				: 1.02;
 	}
 
 	private updatePheromones(): void {

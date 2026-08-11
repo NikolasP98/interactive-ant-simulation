@@ -105,6 +105,32 @@ describe('colony simulation', () => {
 		expect(ant.sensorKind).toBe('home');
 	});
 
+	it('reinforces a direct completed route more strongly than a long detour', () => {
+		const direct = new ColonySimulation('route-quality-test', { population: 8 });
+		const detour = new ColonySimulation('route-quality-test', { population: 8 });
+		for (const colony of [direct, detour]) {
+			colony.foodTrail.fill(0);
+			colony.homeTrail.fill(0.4);
+			for (const ant of colony.ants) ant.trailClock = 10;
+			const ant = colony.ants[0];
+			ant.x = 0;
+			ant.z = 0;
+			ant.angle = 0;
+			ant.hasFood = true;
+			ant.action = 'carry';
+			ant.carryingFoodId = colony.food.id;
+			ant.carryingValue = 3;
+			ant.directTripDistance = 10;
+			ant.trailClock = 0;
+		}
+		direct.ants[0].returnDistance = 2;
+		detour.ants[0].returnDistance = 18;
+		direct.update(1 / 60);
+		detour.update(1 / 60);
+
+		expect(Math.max(...direct.foodTrail)).toBeGreaterThan(Math.max(...detour.foodTrail));
+	});
+
 	it('reflects and recovers before an ant can pace along the field edge', () => {
 		const colony = new ColonySimulation('edge-test', { population: 8 });
 		const ant = colony.ants[0];
