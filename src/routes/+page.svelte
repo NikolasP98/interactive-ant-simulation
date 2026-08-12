@@ -20,6 +20,7 @@
 	let mapCanvas = $state<HTMLCanvasElement>();
 	let view = $state<ColonyView>('habitat');
 	let blogMode = $state(false);
+	let locale = $state<'en' | 'es'>('en');
 	let session = $state('ant-colony-reading');
 	let resourcePreset = $state<ResourcePreset>('balanced');
 	let active = $state(true);
@@ -46,6 +47,11 @@
 	let pointerStart = { x: 0, y: 0 };
 	let simulation: ColonySimulation | null = null;
 	let colonyScene: ColonyScene | null = null;
+	const tr = (en: string, es: string) => locale === 'es' ? es : en;
+	const viewName = (item: ColonyView) => item === 'habitat' ? tr('HABITAT', 'HÁBITAT') : item === 'signals' ? tr('SIGNALS', 'SEÑALES') : tr('2D FIELD', 'CAMPO 2D');
+	const statusName = (status: VisionStatus) => ({
+		search: tr('SEARCH', 'BÚSQUEDA'), signal: tr('SIGNAL', 'SEÑAL'), return: tr('RETURN', 'RETORNO'), recover: tr('RECOVER', 'RECUPERACIÓN')
+	})[status];
 
 	const visionStatuses: VisionStatus[] = ['search', 'signal', 'return', 'recover'];
 	const statusForAnt = (ant: AntAgent): VisionStatus => {
@@ -413,6 +419,8 @@
 		if (!stage || !threeCanvas || !mapCanvas) return;
 		const params = new URLSearchParams(location.search);
 		blogMode = params.get('mode') === 'blog';
+		locale = params.get('lang') === 'es' ? 'es' : 'en';
+		document.documentElement.lang = locale;
 		session = params.get('session') || session;
 		const requestedView = params.get('view') as ColonyView;
 		view = availableViews.includes(requestedView) ? requestedView : 'habitat';
@@ -454,7 +462,7 @@
 				// The colony still starts with a safe default food location.
 			}
 		}
-		colonyScene = new ColonyScene(threeCanvas, simulation, resourcePreset);
+		colonyScene = new ColonyScene(threeCanvas, simulation, resourcePreset, locale);
 		colonyScene.setVisionStatuses(enabledVisionStatuses());
 		if (view !== 'map') colonyScene.setView(view);
 
@@ -508,6 +516,10 @@
 				switchView(event.data.view);
 			}
 			if (event.data?.type === 'pinonite-lab:set-active') active = Boolean(event.data.active);
+			if (event.data?.type === 'pinonite-lab:set-locale') {
+				locale = event.data.locale === 'es' ? 'es' : 'en';
+				document.documentElement.lang = locale;
+			}
 		};
 		window.addEventListener('message', receive);
 		window.parent.postMessage({ type: 'pinonite-lab:ready', session }, '*');
@@ -522,76 +534,76 @@
 </script>
 
 <svelte:head>
-	<title>Ant Colony Signals · Pinonite Source Lab</title>
+	<title>{tr('Ant Colony Signals · Pinonite Source Lab', 'Señales de una colonia de hormigas · Laboratorio Pinonite')}</title>
 	<meta
 		name="description"
-		content="An orbitable ant-colony habitat where local pheromone rules become shared paths."
+		content={tr('An orbitable ant-colony habitat where local pheromone rules become shared paths.', 'Un hábitat orbital donde reglas locales de feromonas se convierten en rutas compartidas.')}
 	/>
 </svelte:head>
 
 <main data-mode={blogMode ? 'blog' : 'expanded'} data-view={view}>
 	<header class="lab-header">
-		<div class="identity"><strong>PINONITE / SOURCE LAB</strong><span>ANTS WRITE THE MAP</span></div>
+		<div class="identity"><strong>PINONITE / {tr('SOURCE LAB', 'LABORATORIO')}</strong><span>{tr('ANTS WRITE THE MAP', 'LAS HORMIGAS ESCRIBEN EL MAPA')}</span></div>
 		{#if !blogMode}
-			<nav aria-label="Simulation views">
+			<nav aria-label={tr('Simulation views', 'Vistas de la simulación')}>
 				{#each availableViews as item}
 					<button class:active={view === item} type="button" onclick={() => switchView(item)}>
-						{item === 'habitat' ? 'HABITAT' : item === 'signals' ? 'SIGNALS' : '2D FIELD'}
+						{viewName(item)}
 					</button>
 				{/each}
 			</nav>
 		{/if}
-		<span class="mode-label">{view === 'map' ? 'ORIGINAL VIEW · LIVE' : 'COLONY SESSION · LIVE'}</span>
+		<span class="mode-label">{view === 'map' ? tr('ORIGINAL VIEW · LIVE', 'VISTA ORIGINAL · EN VIVO') : tr('COLONY SESSION · LIVE', 'SESIÓN DE COLONIA · EN VIVO')}</span>
 	</header>
 
-	<section class="stage" bind:this={stage} aria-label="Live ant colony habitat">
+	<section class="stage" bind:this={stage} aria-label={tr('Live ant colony habitat', 'Hábitat vivo de hormigas')}>
 		<canvas
 			class:hidden={view === 'map'}
 			bind:this={threeCanvas}
 			onpointerdown={(event) => (pointerStart = { x: event.clientX, y: event.clientY })}
 			onpointerup={handleStageClick}
-			aria-label="Orbitable isometric ant habitat. Drag to orbit and click the ground to move food."
+			aria-label={tr('Orbitable isometric ant habitat. Drag to orbit and click the ground to move food.', 'Hábitat isométrico orbital. Arrastra para orbitar y haz clic en el suelo para mover la comida.')}
 		></canvas>
 		<canvas
 			class:hidden={view !== 'map'}
 			bind:this={mapCanvas}
 			onpointerdown={(event) => (pointerStart = { x: event.clientX, y: event.clientY })}
 			onpointerup={handleStageClick}
-			aria-label="Top-down ant simulation. Click the field to move food."
+			aria-label={tr('Top-down ant simulation. Click the field to move food.', 'Simulación de hormigas desde arriba. Haz clic en el campo para mover la comida.')}
 		></canvas>
 
 		<div class="view-note">
-			<span>{view === 'habitat' ? 'ISOMETRIC HABITAT' : view === 'signals' ? 'PHEROMONE FIELD' : 'TOP-DOWN ARCHIVE'}</span>
+			<span>{view === 'habitat' ? tr('ISOMETRIC HABITAT', 'HÁBITAT ISOMÉTRICO') : view === 'signals' ? tr('PHEROMONE FIELD', 'CAMPO DE FEROMONAS') : tr('TOP-DOWN ARCHIVE', 'ARCHIVO CENITAL')}</span>
 			<strong>
 				{view === 'habitat'
-					? 'Small rules, busy world'
+					? tr('Small rules, busy world', 'Reglas pequeñas, mundo ocupado')
 					: view === 'signals'
-						? 'The ground keeps the colony’s memory'
-						: 'The original idea, kept in view'}
+						? tr('The ground keeps the colony’s memory', 'El suelo conserva la memoria de la colonia')
+						: tr('The original idea, kept in view', 'La idea original, todavía visible')}
 			</strong>
-			<small>{temperament.toUpperCase()} · {obstacleCount} BLOCKS · VISION {enabledVisionStatuses().length}/4</small>
+			<small>{temperament.toUpperCase()} · {obstacleCount} {tr('BLOCKS', 'BLOQUES')} · {tr('VISION', 'VISIÓN')} {enabledVisionStatuses().length}/4</small>
 		</div>
 		<div class="readout" aria-live="polite">
-			<span><b>{String(delivered).padStart(2, '0')}</b> DELIVERIES</span>
-			<span><b>{String(harvest).padStart(2, '0')}</b> FOOD VALUE</span>
-			<span><b>{String(carrying).padStart(2, '0')}</b> RETURNING</span>
+			<span><b>{String(delivered).padStart(2, '0')}</b> {tr('DELIVERIES', 'ENTREGAS')}</span>
+			<span><b>{String(harvest).padStart(2, '0')}</b> {tr('FOOD VALUE', 'VALOR DE COMIDA')}</span>
+			<span><b>{String(carrying).padStart(2, '0')}</b> {tr('RETURNING', 'REGRESANDO')}</span>
 		</div>
 		<div class="instruction">
 			{!playing
-				? 'CLICK AN ANT FOR DETAILS · EMPTY GROUND MOVES FOOD'
+				? tr('CLICK AN ANT FOR DETAILS · EMPTY GROUND MOVES FOOD', 'HAZ CLIC EN UNA HORMIGA · EL SUELO VACÍO MUEVE LA COMIDA')
 				: view === 'map'
-					? 'CLICK FIELD TO MOVE RICH FOOD'
-					: 'DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD'} ↗
+					? tr('CLICK FIELD TO MOVE RICH FOOD', 'HAZ CLIC EN EL CAMPO PARA MOVER LA COMIDA RICA')
+					: tr('DRAG TO ORBIT · CLICK GROUND TO MOVE RICH FOOD', 'ARRASTRA PARA ORBITAR · HAZ CLIC PARA MOVER LA COMIDA RICA')} ↗
 		</div>
 		{#if view === 'signals' || showSignals || showVision}
 			<div class="signal-key">
 				<div class="field-legend">
-					<span class="home-dot"></span> HOME CORE
-					<span class="food-dot"></span> FOOD HALO
-					<span class="warning-dot"></span> DOUBT
+					<span class="home-dot"></span> {tr('HOME CORE', 'NÚCLEO HOGAR')}
+					<span class="food-dot"></span> {tr('FOOD HALO', 'HALO COMIDA')}
+					<span class="warning-dot"></span> {tr('DOUBT', 'DUDA')}
 				</div>
 				{#if showVision}
-					<div class="vision-filters" aria-label="Ant vision filters">
+					<div class="vision-filters" aria-label={tr('Ant vision filters', 'Filtros de visión')}>
 						{#each visionStatuses as status}
 							<button
 								type="button"
@@ -600,7 +612,7 @@
 								onclick={() => toggleVisionStatus(status)}
 								aria-pressed={visionFilters[status]}
 							>
-								<span></span>{status}
+								<span></span>{statusName(status)}
 							</button>
 						{/each}
 					</div>
@@ -610,78 +622,78 @@
 		{#if !playing && selectedAnt && selectedAntIndex !== null}
 			<aside class="ant-inspector" aria-live="polite">
 				<header>
-					<div><span>UNIT</span><strong>ANT {String(selectedAntIndex + 1).padStart(2, '0')}</strong></div>
-					<button type="button" onclick={clearSelection} aria-label="Close ant details">×</button>
+					<div><span>{tr('UNIT', 'UNIDAD')}</span><strong>{tr('ANT', 'HORMIGA')} {String(selectedAntIndex + 1).padStart(2, '0')}</strong></div>
+					<button type="button" onclick={clearSelection} aria-label={tr('Close ant details', 'Cerrar detalles')}>×</button>
 				</header>
 				<dl>
-					<div><dt>STATUS</dt><dd>{statusForAnt(selectedAnt).toUpperCase()}</dd></div>
-					<div><dt>DECISION</dt><dd>{selectedAnt.decision.toUpperCase()}</dd></div>
-					<div><dt>READS</dt><dd>{selectedAnt.sensorKind.toUpperCase()} FIELD</dd></div>
-					<div><dt>CONFIDENCE</dt><dd>{Math.round(selectedAnt.signalConfidence * 100)}%</dd></div>
-					<div><dt>CARGO</dt><dd>{selectedAnt.hasFood ? `${selectedAnt.carryingValue}× VALUE` : 'EMPTY'}</dd></div>
-					<div><dt>ROUTE</dt><dd>{(selectedAnt.hasFood ? selectedAnt.returnDistance : selectedAnt.outboundDistance).toFixed(1)} M</dd></div>
+					<div><dt>{tr('STATUS', 'ESTADO')}</dt><dd>{statusName(statusForAnt(selectedAnt)).toUpperCase()}</dd></div>
+					<div><dt>{tr('DECISION', 'DECISIÓN')}</dt><dd>{selectedAnt.decision.toUpperCase()}</dd></div>
+					<div><dt>{tr('READS', 'LEE')}</dt><dd>{selectedAnt.sensorKind.toUpperCase()} {tr('FIELD', 'CAMPO')}</dd></div>
+					<div><dt>{tr('CONFIDENCE', 'CONFIANZA')}</dt><dd>{Math.round(selectedAnt.signalConfidence * 100)}%</dd></div>
+					<div><dt>CARGO</dt><dd>{selectedAnt.hasFood ? `${selectedAnt.carryingValue}× ${tr('VALUE', 'VALOR')}` : tr('EMPTY', 'VACÍO')}</dd></div>
+					<div><dt>{tr('ROUTE', 'RUTA')}</dt><dd>{(selectedAnt.hasFood ? selectedAnt.returnDistance : selectedAnt.outboundDistance).toFixed(1)} M</dd></div>
 				</dl>
 				<div class="sensor-ledger" aria-label="Five sensor readings from left to right">
 					{#each selectedAnt.sensorReadings as reading, index}
 						<span style={`--reading:${Math.max(0.05, reading)};--warning:${selectedAnt.sensorWarnings[index]}`}></span>
 					{/each}
 				</div>
-				<small>FIVE SAMPLES · LEFT → RIGHT</small>
+				<small>{tr('FIVE SAMPLES · LEFT → RIGHT', 'CINCO MUESTRAS · IZQUIERDA → DERECHA')}</small>
 			</aside>
 		{/if}
 	</section>
 
-	<section class="controls" aria-label="Ant colony controls">
+	<section class="controls" aria-label={tr('Ant colony controls', 'Controles de la colonia')}>
 		{#if view === 'habitat'}
 			<label>
-				<span>FORAGERS <output>{population}</output></span>
+				<span>{tr('FORAGERS', 'RECOLECTORAS')} <output>{population}</output></span>
 				<input type="range" min="12" max={resourcePreset === 'conserve' ? 72 : resourcePreset === 'full' ? 160 : 120} bind:value={population} oninput={persistSettings} />
 			</label>
 			<label>
-				<span>TIME SCALE <output>{simSpeed.toFixed(1)}×</output></span>
+				<span>{tr('TIME SCALE', 'ESCALA DE TIEMPO')} <output>{simSpeed.toFixed(1)}×</output></span>
 				<input type="range" min="0.4" max="2" step="0.1" bind:value={simSpeed} oninput={persistSettings} />
 			</label>
 		{:else if view === 'signals'}
 			<label>
-				<span>TRAIL PERSISTENCE <output>{persistence}%</output></span>
+				<span>{tr('TRAIL PERSISTENCE', 'PERSISTENCIA DEL RASTRO')} <output>{persistence}%</output></span>
 				<input type="range" min="20" max="96" bind:value={persistence} oninput={persistSettings} />
 			</label>
 			<label>
-				<span>FIELD DIFFUSION <output>{diffusion}%</output></span>
+				<span>{tr('FIELD DIFFUSION', 'DIFUSIÓN DEL CAMPO')} <output>{diffusion}%</output></span>
 				<input type="range" min="8" max="82" bind:value={diffusion} oninput={persistSettings} />
 			</label>
 		{:else}
 			<label>
-				<span>TRAIL PERSISTENCE <output>{persistence}%</output></span>
+				<span>{tr('TRAIL PERSISTENCE', 'PERSISTENCIA DEL RASTRO')} <output>{persistence}%</output></span>
 				<input type="range" min="20" max="96" bind:value={persistence} oninput={persistSettings} />
 			</label>
 			<label>
-				<span>FORAGERS <output>{population}</output></span>
+				<span>{tr('FORAGERS', 'RECOLECTORAS')} <output>{population}</output></span>
 				<input type="range" min="12" max={resourcePreset === 'conserve' ? 72 : resourcePreset === 'full' ? 160 : 120} bind:value={population} oninput={persistSettings} />
 			</label>
 		{/if}
 		<label class="select-control">
-			<span>COLONY TEMPERAMENT</span>
-			<select bind:value={temperament} onchange={persistSettings} aria-label="Colony temperament">
-				<option value="curious">CURIOUS / EXPLORES</option>
-				<option value="adaptive">ADAPTIVE / BALANCED</option>
-				<option value="disciplined">DISCIPLINED / FOLLOWS</option>
+			<span>{tr('COLONY TEMPERAMENT', 'TEMPERAMENTO')}</span>
+			<select bind:value={temperament} onchange={persistSettings} aria-label={tr('Colony temperament', 'Temperamento de la colonia')}>
+				<option value="curious">{tr('CURIOUS / EXPLORES', 'CURIOSA / EXPLORA')}</option>
+				<option value="adaptive">{tr('ADAPTIVE / BALANCED', 'ADAPTABLE / EQUILIBRADA')}</option>
+				<option value="disciplined">{tr('DISCIPLINED / FOLLOWS', 'DISCIPLINADA / SIGUE')}</option>
 			</select>
 		</label>
 		<button type="button" class:active={obstacleCount > 0} onclick={changeObstacle}>
-			{obstacleCount >= 3 ? 'CLEAR 3 BLOCKS' : `BLOCK BUSY TRAIL ${obstacleCount}/3`}
+			{obstacleCount >= 3 ? tr('CLEAR 3 BLOCKS', 'QUITAR 3 BLOQUES') : `${tr('BLOCK BUSY TRAIL', 'BLOQUEAR RUTA ACTIVA')} ${obstacleCount}/3`}
 		</button>
 		{#if view === 'signals'}
-			<button type="button" onclick={() => colonyScene?.resetOrbit()}>RESET FIELD VIEW ↻</button>
+			<button type="button" onclick={() => colonyScene?.resetOrbit()}>{tr('RESET FIELD VIEW', 'REINICIAR VISTA')} ↻</button>
 		{:else}
-			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>SIGNALS {showSignals ? 'ON' : 'OFF'}</button>
+			<button class:active={showSignals} type="button" onclick={() => { showSignals = !showSignals; persistSettings(); }}>{tr('SIGNALS', 'SEÑALES')} {showSignals ? tr('ON', 'SÍ') : tr('OFF', 'NO')}</button>
 		{/if}
-		<button class:active={showVision} type="button" onclick={() => { showVision = !showVision; persistSettings(); }}>ANT VISION {showVision ? 'ON' : 'OFF'}</button>
-		<button class:active={!playing} type="button" onclick={togglePlaying}>{playing ? 'PAUSE' : 'RESUME'} COLONY</button>
-		<button type="button" onclick={resetColony}>NEW COLONY ↻</button>
+		<button class:active={showVision} type="button" onclick={() => { showVision = !showVision; persistSettings(); }}>{tr('ANT VISION', 'VISIÓN')} {showVision ? tr('ON', 'SÍ') : tr('OFF', 'NO')}</button>
+		<button class:active={!playing} type="button" onclick={togglePlaying}>{playing ? tr('PAUSE', 'PAUSAR') : tr('RESUME', 'REANUDAR')} {tr('COLONY', 'COLONIA')}</button>
+		<button type="button" onclick={resetColony}>{tr('NEW COLONY', 'NUEVA COLONIA')} ↻</button>
 	</section>
 
 	{#if !blogMode}
-		<footer><span>LOCAL RULES → SHARED PATHS</span><span>{resourcePreset.toUpperCase()} RENDER PRESET</span></footer>
+		<footer><span>{tr('LOCAL RULES → SHARED PATHS', 'REGLAS LOCALES → RUTAS COMPARTIDAS')}</span><span>{tr(resourcePreset.toUpperCase(), resourcePreset === 'balanced' ? 'EQUILIBRADO' : resourcePreset === 'conserve' ? 'AHORRO' : 'COMPLETO')} {tr('RENDER PRESET', 'PREAJUSTE GRÁFICO')}</span></footer>
 	{/if}
 </main>

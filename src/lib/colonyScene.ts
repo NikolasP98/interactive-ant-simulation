@@ -158,13 +158,14 @@ export class ColonyScene {
 	private foodGroups = new Map<string, THREE.Group>();
 	private foodLabels = new Map<string, THREE.Sprite>();
 	private obstacleGroups = new Map<string, THREE.Group>();
-	private nestLabel = labelSprite('NEST / HOME', '#4e91bd');
+	private nestLabel: THREE.Sprite;
 	private frameCount = 0;
 
-	constructor(canvas: HTMLCanvasElement, simulation: ColonySimulation, preset: ResourcePreset) {
+	constructor(canvas: HTMLCanvasElement, simulation: ColonySimulation, preset: ResourcePreset, locale: 'en' | 'es' = 'en') {
 		this.canvas = canvas;
 		this.simulation = simulation;
 		this.preset = preset;
+		this.nestLabel = labelSprite(locale === 'es' ? 'NIDO / HOGAR' : 'NEST / HOME', '#4e91bd');
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: preset !== 'conserve', alpha: true });
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 		this.renderer.setClearColor(0xf3f0e6, 1);
@@ -225,7 +226,10 @@ export class ColonyScene {
 			const group = foodVisual(food, preset === 'full');
 			this.foodGroups.set(food.id, group);
 			this.scene.add(group);
-			const label = labelSprite(food.label, food.color, food.value > 1 ? 1.08 : 0.94);
+			const labelText = locale === 'es'
+				? food.id === 'orchard' ? 'FRUTA RICA · 3×' : 'MIGAS CERCANAS · 1×'
+				: food.label;
+			const label = labelSprite(labelText, food.color, food.value > 1 ? 1.08 : 0.94);
 			this.foodLabels.set(food.id, label);
 			this.scene.add(label);
 		}
